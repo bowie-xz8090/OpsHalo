@@ -1,0 +1,34 @@
+schema: spec-driven
+
+context: |
+  项目：OpsHalo，一款基于 Electron、React 19、Node.js 的跨平台 SSH/SFTP 客户端。
+  现有 AI 能力包括 Smart Shell、光标附近提示面板、OpenAI 兼容模型调用、MCP 工具以及 SSH exec/PTY 执行。
+  安全边界：渲染进程不得直接绕过主进程的命令校验、授权、超时、取消和审计；所有 Agent 与 MCP 工具调用必须经过统一 Tool Gateway。
+  产品原则：默认最小权限、只读优先、证据驱动、变更必确认、变更必验证、信息不足不强行下结论。
+  首期目标平台：当前标签页绑定的 Linux SSH 会话；本地 PowerShell 和多主机编排使用独立策略后续扩展。
+  代码风格：主进程 CommonJS、Renderer ES modules、StandardJS；测试包括 node:test、集成测试和 Playwright。
+  本 change 计划将开发/构建 Node.js 基线提升到 20.19+，并使用官方 @strands-agents/sdk 的稳定锁定版本；实施前仍须完成 Electron 打包 gate。
+
+rules:
+  proposal:
+    - 必须包含目标、非目标、影响范围、兼容性和成功判据。
+  design:
+    - 必须明确进程与信任边界、状态机、风险模型、预算、超时、取消、数据保留和失败策略。
+    - 对关键默认值给出确定数值，并将尚未确认的事项显式列为开放问题。
+  specs:
+    - 每项规范使用 SHALL 或 MUST，并至少包含一个 GIVEN/WHEN/THEN 场景。
+    - 安全相关场景必须覆盖允许、需确认、拒绝或失败路径。
+  tasks:
+    - 按可独立验收的阶段拆分，并为每一阶段包含测试或验证任务。
+    - 未完成的实现任务保持未勾选，规划完成不得等同于功能实现。
+
+operations:
+  apply:
+    guidance:
+      - 优先复用现有 SSH、PTY、MCP 和光标提示面板能力，避免平行实现第二套执行通道。
+      - 每次只实施一个可验证阶段；涉及变更执行前先完成统一安全网关。
+      - 不得降低风险级别、扩大自动执行范围或移除验证步骤来绕过失败测试。
+  archive:
+    guidance:
+      - 仅在实现、测试、安全校验和文档全部完成后归档。
+      - 归档摘要必须记录最终默认值、兼容性偏差和遗留风险。

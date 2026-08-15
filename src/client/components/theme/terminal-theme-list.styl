@@ -1,0 +1,29 @@
+
+.theme-item.current
+  border-left 3px solid var(--success)
+
+.item-list.item-type-terminalThemes
+  .item-list-unit.theme-item
+    display flex
+    align-items center
+    position relative
+    padding-right 28px
+  .list-item-apply
+    position absolute
+    right 6px
+    top 50%
+    transform translateY(-50%)
+    display none
+    line-height 1
+    font-size 14px
+  .list-item-remove
+    position absolute
+    right 28px
+    top 50%
+    transform translateY(-50%)
+    display none
+    line-height 1
+  .theme-item:hover
+    .list-item-apply
+    .list-item-remove
+      display inline-flex

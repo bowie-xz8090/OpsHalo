@@ -1,0 +1,52 @@
+
+.terminal-info-icon
+  color var(--text-dark)
+  &:hover
+    color var(--text)
+.info-panel-wrap
+  position fixed
+  right 0
+  top 100px
+  bottom 0
+  width 500px
+  background var(--main)
+  border 1px solid var(--main-darker)
+  border-radius 5px 0 0 5px
+  border-right none
+  color var(--text)
+  z-index 100
+  overflow-y scroll
+
+  .drag-handle
+    left 0
+    right auto
+    display block
+.terminal-info-section
+  padding 10px 0
+.terminal-info-select
+  overflow-x auto
+  padding-bottom 2px
+  .ant-btn
+    flex 0 0 auto
+.terminal-info-act
+.terminal-info-dockers
+.terminal-info-disk
+.terminal-info-network
+  max-height 260px
+  overflow-y scroll
+.terminal-info-dockers
+  max-height 460px
+  overflow hidden
+.docker-info-cell
+  overflow hidden
+  text-overflow ellipsis
+  white-space nowrap
+.activity-item
+  max-height 1.6em
+  line-height 1.6
+  overflow hidden
+  &:hover
+    max-height none
+.info-panel-wrap-pin
+  .toggle-info-panel-wrap
+    color var(--success)

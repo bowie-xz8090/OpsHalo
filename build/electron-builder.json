@@ -1,0 +1,99 @@
+{
+  "appId": "io.opshalo.desktop",
+  "productName": "OpsHalo",
+  "directories": {
+    "app": "work/app",
+    "output": "dist",
+    "buildResources": "node_modules/@electerm/electerm-resource/build-res"
+  },
+  "electronLanguages": [
+    "en-US"
+  ],
+  "asar": true,
+  "asarUnpack": [
+    "node_modules/@openai/codex-*/vendor/**"
+  ],
+  "compression": "maximum",
+  "afterPack": "./build/bin/after-pack.js",
+  "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
+  "win": {
+    "target": [
+      "tar.gz",
+      "appx",
+      "nsis"
+    ],
+    "icon": "node_modules/@electerm/electerm-resource/build/icons-win.ico",
+    "executableName": "OpsHalo"
+  },
+  "protocols": [
+    {
+      "name": "SSH Protocol",
+      "schemes": [
+        "ssh"
+      ]
+    },
+    {
+      "name": "OpsHalo Protocol",
+      "schemes": [
+        "opshalo"
+      ]
+    }
+  ],
+  "appx": {
+    "applicationId": "OpsHalo",
+    "identityName": "OpsHalo.Desktop",
+    "publisher": "CN=OpsHalo",
+    "publisherDisplayName": "OpsHalo"
+  },
+  "nsis": {
+    "oneClick": false,
+    "artifactName": "${productName}-${version}-${os}-${arch}-installer.${ext}",
+    "allowToChangeInstallationDirectory": true
+  },
+  "mac": {
+    "category": "public.app-category.developer-tools",
+    "target": "dmg",
+    "icon": "node_modules/@electerm/electerm-resource/build/icons.icns",
+    "hardenedRuntime": true,
+    "gatekeeperAssess": false,
+    "entitlements": "./build/entitlements.plist",
+    "entitlementsInherit": "./build/entitlements.plist",
+    "notarize": true
+  },
+  "dmg": {
+    "contents": [
+      {
+        "x": 110,
+        "y": 190
+      },
+      {
+        "x": 440,
+        "y": 190,
+        "type": "link",
+        "path": "/Applications"
+      }
+    ]
+  },
+  "linux": {
+    "category": "Development;System;TerminalEmulator",
+    "icon": "node_modules/@electerm/electerm-resource/build-res/linux",
+    "target": [
+      "rpm",
+      "deb",
+      "AppImage",
+      "tar.gz",
+      "snap"
+    ],
+    "desktop": {
+      "entry": {
+        "StartupWMClass": "OpsHalo"
+      }
+    }
+  },
+  "snap": {
+    "confinement": "classic"
+  },
+  "deb": {
+    "afterInstall": "build/bin/linux-deb-after-build.sh"
+  }
+}

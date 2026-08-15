@@ -1,0 +1,55 @@
+.connection-list
+  .connection-list-search
+    .ant-input-search
+      width 100%
+
+  &.connection-list-loading
+    min-height 120px
+    display flex
+    align-items center
+    justify-content center
+
+  .connection-list-items
+    padding 4px 0 12px
+
+  .connection-list-item
+    display flex
+    align-items flex-start
+    gap 10px
+    padding 10px 12px
+    margin 0 8px 4px
+    border-radius 8px
+    color var(--text, #ddd)
+    &:hover
+      background rgba(47, 111, 237, 0.18)
+      .connection-list-edit
+        opacity 1
+
+  .connection-list-icon
+    margin-top 3px
+    font-size 16px
+    color #2f6fed
+
+  .connection-list-main
+    flex 1
+    min-width 0
+
+  .connection-list-title
+    font-size 13px
+    line-height 1.4
+    word-break break-all
+
+  .connection-list-desc
+    margin-top 4px
+    font-size 12px
+    opacity 0.65
+    word-break break-all
+
+  .connection-list-edit
+    opacity 0.35
+    margin-top 3px
+    padding 4px
+    border-radius 4px
+    &:hover
+      opacity 1
+      background rgba(255, 255, 255, 0.08)

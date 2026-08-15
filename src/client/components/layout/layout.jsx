@@ -1,0 +1,187 @@
+import { auto } from 'manate/react'
+import Layouts from './layouts'
+import TabsWrap from '../tabs/index'
+import {
+  splitConfig,
+  quickCommandBoxHeight
+} from '../../common/constants'
+import layoutAlg from './layout-alg'
+import calcSessionSize from './session-size-alg'
+import TermSearch from '../terminal/term-search'
+import SessionsWrap from '../session/sessions'
+import pixed from './pixed'
+import { pick } from 'lodash-es'
+import './layout.styl'
+
+export default auto(function Layout (props) {
+  const { store } = props
+  const {
+    layout, config, currentTab
+  } = store
+  const conf = splitConfig[layout]
+
+  const handleMousedown = (e) => {
+
+  }
+
+  const calcLayoutStyle = () => {
+    const {
+      width,
+      height,
+      pinnedQuickCommandBar,
+      // tabsHeight,
+      leftSidePanelWidth,
+      leftSideBarWidth,
+      // infoPanelPinned,
+      pinned,
+      rightPanelVisible,
+      rightPanelPinned,
+      rightPanelWidth,
+      resizeTrigger,
+      inActiveTerminal
+    } = props.store
+    const h = height - (inActiveTerminal && pinnedQuickCommandBar ? quickCommandBoxHeight : 0) + resizeTrigger
+    const l = pinned ? leftSideBarWidth + leftSidePanelWidth : leftSideBarWidth
+    const r = rightPanelVisible && rightPanelPinned ? rightPanelWidth : 0
+    return {
+      height: h,
+      top: 0,
+      left: l,
+      width: width - l - r
+    }
+  }
+
+  const buildLayoutStyles = () => {
+    const {
+      layout,
+      height,
+      width,
+      pinnedQuickCommandBar,
+      leftSidePanelWidth,
+      leftSideBarWidth,
+      rightPanelVisible,
+      rightPanelPinned,
+      rightPanelWidth,
+      pinned
+    } = props.store
+    const l = pinned ? leftSidePanelWidth : 0
+    const r = rightPanelPinned && rightPanelVisible ? rightPanelWidth : 0
+    // account for the far-left icon bar (sidebarWidth - 1px border on desktop;
+    // 0 when the bar is hidden on mobile)
+    const w = width - l - r - (leftSideBarWidth > 0 ? leftSideBarWidth - 1 : 0)
+    const h = height - (pinnedQuickCommandBar ? quickCommandBoxHeight : 0)
+    return layoutAlg(layout, w, h)
+  }
+  const layoutSize = calcLayoutStyle()
+  const {
+    width,
+    height
+  } = layoutSize
+  const pixedLayoutStyle = pixed(layoutSize)
+  const styles = buildLayoutStyles(conf, layout)
+  const layoutProps = {
+    layout,
+    ...styles,
+    layoutStyle: pixedLayoutStyle,
+    handleMousedown
+  }
+  const sizes = calcSessionSize(layout, width, height)
+
+  function renderSessions (conf, layout) {
+    const {
+      store
+    } = props
+    const { tabs } = store
+    const tabsBatch = {}
+    for (const tab of tabs) {
+      const { batch } = tab
+      if (!tabsBatch[batch]) {
+        tabsBatch[batch] = []
+      }
+      tabsBatch[batch].push(tab)
+    }
+    return sizes.map((v, i) => {
+      const sessProps = {
+        batch: i,
+        layout,
+        currentBatchTabId: store[`activeTabId${i}`],
+        ...v,
+        tabs: tabsBatch[i] || [],
+        ...pick(store, [
+          'isMaximized',
+          'config',
+          'resolutions',
+          'hideDelKeyTip',
+          'fileOperation',
+          'pinnedQuickCommandBar',
+          'tabsHeight',
+          'appPath',
+          'leftSidePanelWidth',
+          'addPanelWidth',
+          'pinned',
+          'openedSideBar',
+          'isMobile'
+        ])
+      }
+      return (
+        <TabsWrap
+          key={'sess' + i}
+          {...sessProps}
+        />
+      )
+    })
+  }
+
+  const termProps = {
+    currentTab,
+    config,
+    ...pick(store, [
+      'activeTabId',
+      'termSearchOpen',
+      'termSearch',
+      'termSearchOptions',
+      'termSearchMatchCount',
+      'termSearchMatchIndex'
+    ])
+  }
+  const sessionsProps = {
+    styles: styles.wrapStyles,
+    sizes,
+    width,
+    height,
+    layoutStyle: pixedLayoutStyle,
+    ...pick(store, [
+      'activeTabId',
+      'activeTabId0',
+      'activeTabId1',
+      'activeTabId2',
+      'activeTabId3',
+      'batch',
+      'resolutions',
+      'hideDelKeyTip',
+      'fileOperation',
+      'file',
+      'pinnedQuickCommandBar',
+      'tabsHeight',
+      'appPath',
+      'leftSidePanelWidth',
+      'leftSideBarWidth',
+      'pinned',
+      'openedSideBar',
+      'config',
+      'fullscreen'
+    ]),
+    tabs: store.tabs,
+    layout
+  }
+  return [
+    <Layouts {...layoutProps} key='layouts'>
+      {renderSessions(conf, layout)}
+    </Layouts>,
+    <SessionsWrap key='SessionsWrap' {...sessionsProps} />,
+    <TermSearch
+      key='TermSearch'
+      {...termProps}
+    />
+  ]
+})

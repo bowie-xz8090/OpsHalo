@@ -1,0 +1,228 @@
+/**
+ * init static state
+ */
+import {
+  settingMap,
+  defaultBookmarkGroupId,
+  fileOperationsMap,
+  syncTypes,
+  infoTabs,
+  openedSidebarKey,
+  sidebarPinnedKey,
+  leftSideBarOpenKey,
+  pinnedQuickCommandBarKey,
+  sftpDefaultSortSettingKey,
+  batchInputLsKey,
+  expandedKeysLsKey,
+  checkedKeysLsKey,
+  localAddrBookmarkLsKey,
+  leftSidePanelWidthKey,
+  rightSidebarWidthKey,
+  addPanelWidthLsKey,
+  dismissDelKeyTipLsKey,
+  qmSortByFrequencyKey,
+  resolutionsLsKey,
+  syncServerDataKey,
+  splitMap,
+  lastAiChatSessionIdKey,
+  mobileBreakpoint
+} from '../common/constants'
+import * as ls from '../common/safe-local-storage'
+import { exclude } from 'manate'
+import initSettingItem from '../common/init-setting-item'
+import { getRandomDefaultColor } from '../common/rand-hex-color'
+
+const e = window.translate
+
+function getDefaultBookmarkGroups (bookmarks) {
+  return [
+    {
+      title: e(defaultBookmarkGroupId),
+      id: defaultBookmarkGroupId,
+      bookmarkIds: bookmarks.map(d => d.id),
+      bookmarkGroupIds: [],
+      color: getRandomDefaultColor()
+    }
+  ]
+}
+
+export default () => {
+  const layout = ls.getItem('layout') || splitMap.c1
+  // far-left icon bar is open by default; once the user toggles it, honor the
+  // saved preference ('true'/'false') from localStorage.
+  const storedSideBarOpen = ls.getItem(leftSideBarOpenKey)
+  const leftSideBarOpen = storedSideBarOpen === '' ? true : storedSideBarOpen === 'true'
+  return {
+    // common
+    wsInited: false,
+    configLoaded: false,
+    initLoadingData: false,
+    loadTime: 0,
+    lastDataUpdateTime: 0,
+    tabs: [],
+    activeTabId: '',
+    history: [],
+    sshConfigs: [],
+    bookmarks: [],
+    bookmarksMap: new Map(),
+    sidebarPanelTab: 'bookmarks',
+    profiles: [],
+    bookmarkGroups: getDefaultBookmarkGroups([]),
+    _config: {},
+    terminalThemes: [],
+    itermThemes: exclude([]),
+    currentBookmarkGroupId: defaultBookmarkGroupId,
+    expandedKeys: ls.getItemJSON(expandedKeysLsKey, [
+      defaultBookmarkGroupId
+    ]),
+    bookmarkSelectMode: false,
+    checkedKeys: ls.getItemJSON(checkedKeysLsKey, []),
+    addressBookmarks: [],
+    addressBookmarksLocal: ls.getItemJSON(localAddrBookmarkLsKey, []),
+    openResolutionEdit: false,
+    resolutions: ls.getItemJSON(resolutionsLsKey, []),
+    // terminalCommandHistory: [{ id, cmd, count, lastUseTime }]
+    // Loaded from DB in initData
+    terminalCommandHistory: [],
+
+    // workspaces
+    workspaces: [],
+    workspaceSaveModalVisible: false,
+
+    // init session control
+    selectedSessions: [],
+    sessionModalVisible: false,
+
+    // batch input selected tab ids
+    _batchInputSelectedTabIds: new Set(),
+    aiChatHistory: [],
+    agentRunning: false,
+    currentChatSessionId: window.localStorage.getItem(lastAiChatSessionIdKey) || '',
+    showChatSessions: false,
+
+    // sftp
+    fileOperation: fileOperationsMap.cp, // cp or mv
+    pauseAllTransfer: false,
+    transferTab: 'transfer',
+    transferHistory: [],
+    fileTransfers: [],
+    transferToConfirm: {},
+    sftpSortSetting: ls.getItemJSON(sftpDefaultSortSettingKey, {
+      local: {
+        prop: 'modifyTime',
+        direction: 'desc'
+      },
+      remote: {
+        prop: 'modifyTime',
+        direction: 'desc'
+      }
+    }),
+    layout,
+    prevLayout: layout,
+    resizeTrigger: 0,
+    currentLayoutBatch: 0,
+    activeTabId0: '',
+    activeTabId1: '',
+    activeTabId2: '',
+    activeTabId3: '',
+    terminalInfoProps: {},
+    rightPanelVisible: false,
+    rightPanelTab: 'info',
+    rightPanelPinned: false,
+    _rightPanelWidth: parseInt(ls.getItem(rightSidebarWidthKey), 10) || 500,
+    showAIConfigModal: false,
+    connectionModalVisible: false,
+    connectionFormItem: null,
+
+    // for settings related
+    settingItem: initSettingItem([], settingMap.setting),
+    settingTab: settingMap.setting, // setting tab
+    bookmarkId: undefined,
+    showModal: 0,
+
+    // setting sync related
+    autoSyncReady: false,
+    isSyncingSetting: false,
+    isSyncUpload: false,
+    isSyncDownload: false,
+    syncType: syncTypes.github,
+    // syncServerData: {},
+    syncServerStatus: ls.getItemJSON(syncServerDataKey, {}),
+
+    // term search
+    termSearchOpen: false,
+    termSearch: '',
+    termSearchMatchCount: 0,
+    termSearchMatchIndex: 0,
+    _termSearchOptions: {
+      caseSensitive: false,
+      wholeWord: false,
+      regex: false,
+      decorations: {
+        activeMatchColorOverviewRuler: 'yellow'
+      }
+    },
+
+    // quick commands
+    quickCommands: [],
+    quickCommandId: '',
+    openQuickCommandBar: false,
+    pinnedQuickCommandBar: ls.getItem(pinnedQuickCommandBarKey) === 'y',
+    qmSortByFrequency: ls.getItem(qmSortByFrequencyKey) === 'yes',
+
+    // sidebar
+    openedSideBar: (() => {
+      const v = ls.getItem(openedSidebarKey) || ''
+      return v === 'bookmarks' ? '' : v
+    })(),
+    _leftSidePanelWidth: parseInt(ls.getItem(leftSidePanelWidthKey), 10) || 300,
+    // whether the far-left icon bar is open (hide/show works on every platform)
+    _leftSideBarOpen: leftSideBarOpen,
+    addPanelWidth: parseInt(ls.getItem(addPanelWidthLsKey), 10) || 300,
+    menuOpened: false,
+    pinned: ls.getItem(sidebarPinnedKey) === 'true',
+
+    // info/help modal
+    showInfoModal: false,
+    infoModalTab: infoTabs.info,
+    commandLineHelp: '',
+
+    // editor
+    showEditor: false,
+
+    // file/info modal
+    showFileModal: false,
+
+    // serial list related
+    serials: [],
+    loaddingSerials: false,
+
+    appPath: '',
+    exePath: '',
+    isPortable: false,
+    installSrc: '',
+    showSshConfigModal: false,
+
+    // batch inputs
+    batchInputs: ls.getItemJSON(batchInputLsKey, []),
+
+    // ui — 必须用真实窗口尺寸初始化，否则首屏会按 height:500 布局，出现短暂“半窗”
+    innerWidth: window.innerWidth,
+    height: window.innerHeight,
+    isMaximized: window.pre.runSync('isMaximized'),
+    hasNodePty: window.pre.runSync('nodePtyCheck'),
+    isMobile: window.innerWidth <= mobileBreakpoint,
+    fullscreen: false,
+    hideDelKeyTip: ls.getItem(dismissDelKeyTipLsKey) === 'y',
+    tabsHeight: 36,
+
+    // widgets
+    widgets: [],
+    widgetInstances: [],
+    autoRunWidgets: [],
+    // move item
+    openMoveModal: false,
+    moveItem: null,
+    moveItemIsGroup: false
+  }
+}

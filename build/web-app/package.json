@@ -1,0 +1,32 @@
+{
+  "name": "@opshalo/web-app",
+  "version": "1.0.0",
+  "description": "OpsHalo web application components",
+  "main": "./client/components/main/main.jsx",
+  "license": "MIT",
+  "langugeRepo": "https://github.com/electerm/electerm-locales",
+  "privacyNoticeLink": "https://github.com/bowie-xz8090/OpsHalo/blob/master/README.md#security-and-privacy",
+  "knownIssuesLink": "https://github.com/bowie-xz8090/OpsHalo/issues",
+  "sponsorLink": "https://github.com/bowie-xz8090/OpsHalo",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bowie-xz8090/OpsHalo.git"
+  },
+  "author": {
+    "name": "OpsHalo Contributors",
+    "url": "https://github.com/bowie-xz8090/OpsHalo"
+  },
+  "bugs": {
+    "url": "https://github.com/bowie-xz8090/OpsHalo/issues"
+  },
+  "homepage": "https://github.com/bowie-xz8090/OpsHalo",
+  "releases": "https://github.com/bowie-xz8090/OpsHalo/releases",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "client",
+    "README.md",
+    "LICENSE"
+  ]
+}

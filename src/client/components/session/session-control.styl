@@ -1,0 +1,106 @@
+// Mobile session control: pane tabs always visible,
+// other icons shown in a floating Popover overlay
+.term-sftp-box > .terminal-control
+  height 32px
+  box-sizing border-box
+
+.mobile-session-control
+  background var(--main)
+  line-height 32px
+  padding 0 10px
+  display flex
+  align-items center
+  // pane tabs take available space, menu icon sits at the end
+  .term-sftp-tabs
+    float none
+    display flex
+    align-items center
+    flex 1
+    min-width 0
+.mobile-control-toggle
+  font-size 16px
+  line-height 32px
+  color var(--text)
+  flex-shrink 0
+  &:hover
+    color var(--text-light)
+
+// Popover content — icons laid out in a row, wrapping as needed
+.mobile-control-icons
+  display flex
+  flex-wrap wrap
+  align-items center
+  gap 4px 8px
+  max-width 280px
+  line-height 30px
+  .term-controls
+    float none
+    display flex
+    align-items center
+    margin-left 0
+  .sess-icon
+    margin-right 0
+
+.term-controls
+  display flex
+  align-items center
+  gap 10px
+  height 32px
+  .spliter
+    margin-right 0
+
+.session-encoding-select
+  min-width 76px
+  .ant-select-selector
+    height 24px !important
+  .ant-select-selection-item
+    line-height 22px !important
+
+.agent-input-mode-switch
+  display inline-flex
+  align-items center
+  height 24px
+  margin 4px 10px
+  padding 2px
+  border 1px solid var(--border)
+  border-radius 5px
+  background var(--main)
+  vertical-align top
+
+.agent-input-mode-option
+  height 18px
+  padding 0 9px
+  border 0
+  border-radius 3px
+  background transparent
+  color var(--text)
+  font-size 12px
+  line-height 18px
+  cursor pointer
+  white-space nowrap
+  &:hover:not(:disabled)
+    color var(--text-light)
+  &.active
+    background var(--primary)
+    color var(--primary-text, #fff)
+  &:focus-visible
+    outline 2px solid var(--primary)
+    outline-offset 1px
+  &:disabled
+    cursor wait
+    opacity .65
+
+.mobile-control-icons
+  .agent-input-mode-switch
+    margin 3px 0
+
+@container (max-width: 430px)
+  .terminal-control:not(.mobile-session-control)
+    .sftp-follow-ssh-icon,
+    .split-view-toggle,
+    .keepalive-icon,
+    .broadcast-icon,
+    .wrap-toggle-icon,
+    .reload-session-icon,
+    .transfer-session-wrap
+      display none

@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: ⁉️ Need help with Electerm?
+    url: https://github.com/bowie-xz8090/OpsHalo/issues
+    about: Please start a discussion before opening a bug.
