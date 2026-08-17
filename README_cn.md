@@ -58,7 +58,9 @@ npm run compile
 
 ## 更新与发行
 
-OpsHalo 1.0.0 不执行自动更新，也不提供应用内手动更新检查。初始仓库导入阶段暂时禁用发行打包与自动发布。
+OpsHalo 1.0.0 不执行自动更新，也不提供应用内手动更新检查。
+
+发行包由 GitHub Actions 构建。打开 **Actions → Release multi-platform**，运行工作流并填写标签（例如 `v1.0.0`）。完成后会将 Windows、macOS、Linux 产物发布到 [GitHub Releases](https://github.com/bowie-xz8090/OpsHalo/releases)。
 
 ## 安全与隐私
 

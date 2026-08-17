@@ -58,7 +58,9 @@ Development data is stored in `.opshalo-dev-data`. Packaged builds use an indepe
 
 ## Updates and releases
 
-OpsHalo 1.0.0 does not perform automatic or manual in-app update checks. Release packaging and publication are intentionally disabled for the initial repository import.
+OpsHalo 1.0.0 does not perform automatic or manual in-app update checks.
+
+Release packages are built by GitHub Actions. Open **Actions → Release multi-platform**, run the workflow, and provide a tag such as `v1.0.0`. The job publishes Windows, macOS, and Linux artifacts to [GitHub Releases](https://github.com/bowie-xz8090/OpsHalo/releases).
 
 ## Security and privacy
 
