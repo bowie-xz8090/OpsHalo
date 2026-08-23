@@ -61,14 +61,7 @@ export const statusMap = buildConst([
 
 export const connectionMap = buildConst([
   'ssh',
-  'telnet',
-  'serial',
-  'local',
-  'web',
-  'rdp',
-  'vnc',
-  'ftp',
-  'spice'
+  'local'
 ])
 
 export const authTypeMap = buildConst([
@@ -78,7 +71,6 @@ export const authTypeMap = buildConst([
 ])
 
 export const footerHeight = 36
-export const quickCommandBoxHeight = 180
 export const isWin = typeof window.et.isWin === 'undefined' ? window.pre.isWin : window.et.isWin
 export const isMac = typeof window.et.isMac === 'undefined' ? window.pre.isMac : window.et.isMac
 export const isMacJs = /Macintosh|Mac|Mac OS|MacIntel|MacPPC|Mac68K/gi.test(window.navigator.userAgent)
@@ -137,64 +129,14 @@ export const fileOperationsMap = buildConst([
 ])
 
 export const terminalSshConfigType = 'ssh-config'
-export const terminalWebType = 'web'
-export const terminalRdpType = 'rdp'
-export const terminalVncType = 'vnc'
-export const terminalSerialType = 'serial'
-export const terminalTelnetType = 'telnet'
 export const terminalLocalType = 'local'
-export const terminalFtpType = 'ftp'
-export const terminalSpiceType = 'spice'
 export const openedSidebarKey = 'opened-sidebar'
 export const sidebarPinnedKey = 'sidebar-pinned'
 export const leftSideBarOpenKey = 'left-side-bar-open'
-export const pinnedQuickCommandBarKey = 'pinned-quick-command-bar'
 export const leftSidePanelWidthKey = 'left-sidebar-width'
 export const rightSidebarWidthKey = 'right-sidebar-width'
 export const addPanelWidthLsKey = 'addPanelWidth'
 export const sftpDefaultSortSettingKey = 'sftp-default-sort'
-export const qmSortByFrequencyKey = 'qm-sort-by-frequency'
-
-export const commonBaudRates = [
-  110,
-  300,
-  1200,
-  2400,
-  4800,
-  9600,
-  14400,
-  19200,
-  38400,
-  57600,
-  115200
-]
-
-export const commonDataBits = [
-  8, 7, 6, 5
-]
-
-export const commonStopBits = [
-  1, 2
-]
-
-export const commonParities = [
-  'none', 'even', 'mark', 'odd', 'space'
-]
-
-export const commonTxLineEndings = [
-  { value: '\r', label: 'CR' },
-  { value: '\n', label: 'LF' },
-  { value: '\r\n', label: 'CR+LF' }
-]
-
-export const commonRxLineEndings = [
-  { value: 'none', label: 'None' },
-  { value: 'lf_to_crlf', label: 'LF→CRLF' },
-  { value: 'cr_to_crlf', label: 'CR→CRLF' }
-]
-
-// backward compat alias
-export const commonLineEndings = commonTxLineEndings
 
 export const maxBatchInput = 30
 export const windowControlWidth = 94
@@ -237,9 +179,7 @@ export const rendererTypes = {
   webGL: 'webGL'
 }
 export const expandedKeysLsKey = 'expanded-keys'
-export const resolutionsLsKey = 'custom-resolution-key'
 export const checkedKeysLsKey = 'checked-keys'
-export const quickCommandLabelsLsKey = 'quick-command-label'
 export const localAddrBookmarkLsKey = 'local-addr-bookmark-keys'
 export const dismissDelKeyTipLsKey = 'dismiss-del-key-tip'
 export const treeSortLsKey = 'tree-sort'

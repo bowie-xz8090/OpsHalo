@@ -62,14 +62,13 @@ const {
 const { openFileWithEditor } = require('./open-file-with-editor')
 const { loadFontList } = require('./font-list')
 const { checkDbUpgrade, doUpgrade } = require('../upgrade')
-const { listSerialPorts } = require('./serial-port')
 const initApp = require('./init-app')
 const { encryptAsync, decryptAsync } = require('./enc')
 const { safeEncrypt, safeDecrypt } = require('./safe-storage')
 const { initCommandLine } = require('./command-line')
 const { watchFile, unwatchFile } = require('./watch-file')
 const lookup = require('../common/lookup')
-const { AIchat, AIchatWithTools, getStreamContent, stopStream } = require('./ai')
+const { AIchat, getStreamContent, stopStream, probeAgentModel } = require('./ai')
 const crypto = require('crypto')
 const { initAgentRuntime } = require('../agent')
 
@@ -170,7 +169,6 @@ function initIpc () {
     lookup,
     loadSshConfig,
     init,
-    listSerialPorts,
     loadFontList,
     doUpgrade,
     checkDbUpgrade,
@@ -217,7 +215,7 @@ function initIpc () {
     },
     saveUserConfig,
     AIchat,
-    AIchatWithTools,
+    probeAgentModel,
     getStreamContent,
     stopStream,
     setTitle: (title) => {

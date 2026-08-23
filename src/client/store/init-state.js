@@ -10,7 +10,6 @@ import {
   openedSidebarKey,
   sidebarPinnedKey,
   leftSideBarOpenKey,
-  pinnedQuickCommandBarKey,
   sftpDefaultSortSettingKey,
   batchInputLsKey,
   expandedKeysLsKey,
@@ -20,8 +19,6 @@ import {
   rightSidebarWidthKey,
   addPanelWidthLsKey,
   dismissDelKeyTipLsKey,
-  qmSortByFrequencyKey,
-  resolutionsLsKey,
   syncServerDataKey,
   splitMap,
   lastAiChatSessionIdKey,
@@ -79,8 +76,6 @@ export default () => {
     checkedKeys: ls.getItemJSON(checkedKeysLsKey, []),
     addressBookmarks: [],
     addressBookmarksLocal: ls.getItemJSON(localAddrBookmarkLsKey, []),
-    openResolutionEdit: false,
-    resolutions: ls.getItemJSON(resolutionsLsKey, []),
     // terminalCommandHistory: [{ id, cmd, count, lastUseTime }]
     // Loaded from DB in initData
     terminalCommandHistory: [],
@@ -163,13 +158,6 @@ export default () => {
       }
     },
 
-    // quick commands
-    quickCommands: [],
-    quickCommandId: '',
-    openQuickCommandBar: false,
-    pinnedQuickCommandBar: ls.getItem(pinnedQuickCommandBarKey) === 'y',
-    qmSortByFrequency: ls.getItem(qmSortByFrequencyKey) === 'yes',
-
     // sidebar
     openedSideBar: (() => {
       const v = ls.getItem(openedSidebarKey) || ''
@@ -192,10 +180,6 @@ export default () => {
 
     // file/info modal
     showFileModal: false,
-
-    // serial list related
-    serials: [],
-    loaddingSerials: false,
 
     appPath: '',
     exePath: '',

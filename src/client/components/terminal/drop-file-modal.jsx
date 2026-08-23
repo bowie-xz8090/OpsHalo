@@ -6,31 +6,9 @@ export function DropFileModal (props) {
   const {
     visible,
     files,
-    isSerial,
     onSelect,
     onCancel
   } = props
-
-  const renderSerialFooter = () => {
-    return (
-      <>
-        <button
-          type='button'
-          className='custom-modal-ok-btn'
-          onClick={() => onSelect('xmodem')}
-        >
-          XMODEM
-        </button>
-        <button
-          type='button'
-          className='custom-modal-cancel-btn'
-          onClick={() => onSelect('inputOnly')}
-        >
-          {e('inputOnly')}
-        </button>
-      </>
-    )
-  }
 
   const renderSshFooter = () => {
     return (
@@ -81,7 +59,7 @@ export function DropFileModal (props) {
       onCancel={onCancel}
       footer={
         <div className='custom-modal-footer-buttons'>
-          {isSerial ? renderSerialFooter() : renderSshFooter()}
+          {renderSshFooter()}
         </div>
       }
       width={400}

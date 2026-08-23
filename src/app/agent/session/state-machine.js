@@ -8,7 +8,7 @@ const allowedTransitions = Object.freeze({
   executing: ['observing', 'cancelled', 'paused', 'failed'],
   observing: ['reducing', 'cancelled', 'failed', 'paused'],
   reducing: ['evaluating', 'cancelled', 'failed', 'paused'],
-  evaluating: ['planning', 'awaiting_user', 'verifying', 'complete', 'inconclusive', 'blocked', 'failed', 'cancelled', 'paused'],
+  evaluating: ['planning', 'policy_check', 'awaiting_user', 'verifying', 'complete', 'inconclusive', 'blocked', 'failed', 'cancelled', 'paused'],
   awaiting_user: ['planning', 'cancelled', 'paused'],
   verifying: ['planning', 'awaiting_approval', 'complete', 'inconclusive', 'failed', 'cancelled', 'paused'],
   paused: ['planning', 'verifying', 'cancelled', 'blocked'],
@@ -106,24 +106,28 @@ function reduceSession (state, command) {
         }
         assertTransition(state.status, 'policy_check')
         next.status = 'policy_check'
+        const actions = decision.readProbeBundle?.actions?.map(item => item.intent) || [decision.action]
         return {
           state: next,
           events: [
             { type: 'plan.updated', payload: decision },
-            {
+            ...actions.map(action => ({
               type: 'action.proposed',
-              correlationId: decision.action.invocationId,
+              correlationId: action.invocationId,
               payload: {
-                invocationId: decision.action.invocationId,
-                toolName: decision.action.toolName,
-                targetDisplay: decision.action.target.display,
-                purpose: decision.action.purpose,
-                expectedObservation: decision.action.expectedObservation
+                invocationId: action.invocationId,
+                toolName: action.toolName,
+                targetDisplay: action.target.display,
+                purpose: action.purpose,
+                expectedObservation: action.expectedObservation,
+                bundleId: decision.readProbeBundle?.bundleId
               }
-            },
+            })),
             { type: 'session.state_changed', payload: { from: state.status, to: 'policy_check' } }
           ],
-          effects: [{ type: 'EVALUATE_INTENT', intent: decision.action, effectId: command.effectId }]
+          effects: [decision.readProbeBundle
+            ? { type: 'EVALUATE_READ_BUNDLE', bundle: decision.readProbeBundle, effectId: command.effectId }
+            : { type: 'EVALUATE_INTENT', intent: decision.action, effectId: command.effectId }]
         }
       }
       if (decision.goalStatus === 'need_user') {
@@ -204,6 +208,41 @@ function reduceSession (state, command) {
       result.effects.push({ type: 'EVALUATE_PROGRESS', effectId: command.effectId })
       return result
     }
+    case 'BUNDLE_POLICY_DECIDED': {
+      if (state.status !== 'policy_check') throwInvalidCommand(state, command)
+      const actions = command.preparedBundle.prepared.map(item => item.prepared)
+      const bundleState = {
+        ...state,
+        currentInvocation: {
+          bundleId: command.preparedBundle.bundle.bundleId,
+          phase: 'authorized',
+          mutability: 'none',
+          invocationIds: actions.map(item => item.intent.invocationId)
+        }
+      }
+      const result = transition(bundleState, 'executing', undefined)
+      result.events = [
+        ...actions.map(action => ({ type: 'policy.evaluated', correlationId: action.intent.invocationId, payload: action.decision })),
+        ...result.events
+      ]
+      for (const action of actions) {
+        result.events.push({
+          type: 'execution.started',
+          correlationId: action.intent.invocationId,
+          payload: {
+            invocationId: action.intent.invocationId,
+            toolName: action.intent.toolName,
+            targetDisplay: action.intent.target.display,
+            mode: 'exec',
+            timeoutMs: action.timeoutMs,
+            bundleId: command.preparedBundle.bundle.bundleId,
+            startedAt: new Date().toISOString()
+          }
+        })
+      }
+      result.effects.push({ type: 'EXECUTE_READ_BUNDLE', preparedBundle: command.preparedBundle, effectId: command.effectId })
+      return result
+    }
     case 'APPROVAL_RESOLVED': {
       if (state.status !== 'awaiting_approval') throwInvalidCommand(state, command)
       if (command.choice === 'cancel_task') return transition(state, 'cancelled', command.reason, 'session.cancelled', command.finalResult || {})
@@ -266,7 +305,7 @@ function reduceSession (state, command) {
       return {
         state,
         events: [{
-          type: 'execution.progress',
+          type: command.payload.source === 'output' ? 'execution.output_progress' : 'execution.progress',
           correlationId: command.invocationId,
           payload: command.payload
         }],
@@ -290,6 +329,27 @@ function reduceSession (state, command) {
       result.effects.push({ type: 'BUILD_OBSERVATION', result: command.result, streams: command.streams, effectId: command.effectId })
       return result
     }
+    case 'BUNDLE_EXECUTION_FINISHED': {
+      if (state.status !== 'executing') throwInvalidCommand(state, command)
+      const result = transition({
+        ...state,
+        currentInvocation: { ...state.currentInvocation, phase: 'finished' }
+      }, 'observing', undefined)
+      for (const item of command.execution.results) {
+        result.events.push({
+          type: 'execution.finished',
+          correlationId: item.intent.invocationId,
+          payload: item.result || {
+            invocationId: item.intent.invocationId,
+            status: item.notStarted ? 'cancelled' : 'error',
+            error: item.error,
+            bundleId: command.execution.bundle.bundleId
+          }
+        })
+      }
+      result.effects.push({ type: 'BUILD_BUNDLE_OBSERVATIONS', execution: command.execution, effectId: command.effectId })
+      return result
+    }
     case 'OBSERVATION_READY': {
       if (state.status !== 'observing') throwInvalidCommand(state, command)
       const result = transition(state, 'reducing', undefined, 'observation.ready', command.observation)
@@ -297,6 +357,18 @@ function reduceSession (state, command) {
         result.events.push({ type: 'evidence.available', correlationId: command.observation.invocationId, payload: { evidenceRef, invocationId: command.observation.invocationId } })
       }
       result.effects.push({ type: 'REDUCE_CONTEXT', observation: command.observation, effectId: command.effectId })
+      return result
+    }
+    case 'BUNDLE_OBSERVATIONS_READY': {
+      if (state.status !== 'observing') throwInvalidCommand(state, command)
+      const result = transition(state, 'reducing', undefined)
+      for (const observation of command.observations) {
+        result.events.push({ type: 'observation.ready', correlationId: observation.invocationId, payload: observation })
+        for (const evidenceRef of observation.evidenceRefs || []) {
+          result.events.push({ type: 'evidence.available', correlationId: observation.invocationId, payload: { evidenceRef, invocationId: observation.invocationId } })
+        }
+      }
+      result.effects.push({ type: 'REDUCE_BUNDLE_CONTEXT', observations: command.observations, invocations: command.invocations, effectId: command.effectId })
       return result
     }
     case 'CONTEXT_REDUCED': {
@@ -309,6 +381,33 @@ function reduceSession (state, command) {
       const result = transition(state, 'planning', command.reason)
       result.effects.push({ type: 'RUN_HARNESS', effectId: command.effectId })
       return result
+    }
+    case 'FOLLOW_UP_PROPOSED': {
+      if (state.status !== 'evaluating') throwInvalidCommand(state, command)
+      const next = {
+        ...state,
+        status: 'policy_check',
+        snapshotVersion: state.snapshotVersion + 1,
+        updatedAt: new Date().toISOString()
+      }
+      return {
+        state: next,
+        events: [
+          {
+            type: 'action.proposed',
+            correlationId: command.intent.invocationId,
+            payload: {
+              invocationId: command.intent.invocationId,
+              toolName: command.intent.toolName,
+              targetDisplay: command.intent.target.display,
+              purpose: command.intent.purpose,
+              expectedObservation: command.intent.expectedObservation
+            }
+          },
+          { type: 'session.state_changed', payload: { from: state.status, to: 'policy_check', reason: command.reason } }
+        ],
+        effects: [{ type: 'EVALUATE_INTENT', intent: command.intent, effectId: command.effectId }]
+      }
     }
     case 'VERIFY_COMPLETION': {
       const result = transition(state, 'verifying', command.reason, 'verification.started', command.payload || {})

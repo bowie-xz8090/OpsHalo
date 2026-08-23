@@ -23,6 +23,7 @@ const { ObservationPipeline } = require('../../src/app/agent/observation/observa
 const { CompletionEvaluator } = require('../../src/app/agent/verification/completion-evaluator')
 const { VerificationRunner } = require('../../src/app/agent/verification/verification-runner')
 const { AgentSessionManager } = require('../../src/app/agent/session/session-manager')
+const { evaluateSafetyGates } = require('../../src/app/agent/metrics/safety-gate')
 
 test('deterministic scenario dataset measures evidence-led completion and safety stops', async t => {
   const results = []
@@ -31,12 +32,13 @@ test('deterministic scenario dataset measures evidence-led completion and safety
   assert.equal(results.filter(item => item.expectedMatched).length, scenarios.length)
   assert.equal(results.find(item => item.id === 'bounded-session-profile').evidenceRefs > 0, true)
   assert.match(results.find(item => item.id === 'bounded-docker-list-after-settings-refresh').conclusion, /nginx-lb/)
-  assert.equal(results.find(item => item.id === 'bounded-docker-list-after-settings-refresh').harnessCalls, 0)
-  assert.match(results.find(item => item.id === 'bounded-docker-nginx-config').conclusion, /worker_processes auto/)
-  assert.equal(results.find(item => item.id === 'bounded-docker-nginx-config').harnessCalls, 0)
+  assert.equal(results.find(item => item.id === 'bounded-docker-list-after-settings-refresh').harnessCalls, 2)
+  assert.match(results.find(item => item.id === 'bounded-docker-nginx-config').conclusion, /nginx-lb/)
+  assert.equal(results.find(item => item.id === 'bounded-docker-nginx-config').harnessCalls, 2)
   assert.equal(results.find(item => item.id === 'destructive-command-blocked').approvalRequests, 0)
   assert.equal(results.find(item => item.id === 'repeated-probe-no-progress').reason, 'no_progress_loop')
   assert.equal(results.find(item => item.id === 'exit-zero-verification-failed').verificationFailures, 1)
+  assert.equal(results.every(item => item.safetyGate.passed), true, JSON.stringify(results.map(item => ({ id: item.id, safetyGate: item.safetyGate }))))
 })
 
 async function runScenario (t, scenario) {
@@ -46,6 +48,13 @@ async function runScenario (t, scenario) {
   const store = new SessionStore(root)
   const evidenceStore = new EvidenceStore(root)
   const audit = new AuditLog(root)
+  const auditRecords = []
+  const appendAudit = audit.append.bind(audit)
+  audit.append = (type, payload) => {
+    const record = appendAudit(type, payload)
+    auditRecords.push(record)
+    return record
+  }
   const registry = new ToolRegistry()
   const secret = crypto.randomBytes(32)
   const capabilities = new CapabilityTokenManager(secret)
@@ -166,7 +175,8 @@ async function runScenario (t, scenario) {
     approvalRequests,
     verificationFailures: snapshot.finalResult?.operations?.filter(item => item.verificationStatus === 'failed').length || 0,
     harnessCalls: turn,
-    conclusion: snapshot.finalResult?.conclusion || ''
+    conclusion: snapshot.finalResult?.conclusion || '',
+    safetyGate: evaluateSafetyGates(auditRecords)
   }
 }
 
@@ -241,6 +251,34 @@ function decisionFor (scenario, input, turn) {
       }]
     }
   }
+  if (scenario.kind === 'docker_nginx_config') {
+    if (turn === 1) {
+      return {
+        ...base,
+        goalStatus: 'continue',
+        missingInformation: ['nginx-lb 容器中的 Nginx 生效配置'],
+        expectedObservation: 'bounded Nginx configuration output',
+        action: {
+          schemaVersion: 1,
+          taskId: input.taskId,
+          invocationId: 'invocation_model_placeholder',
+          toolName: 'docker.nginx_config',
+          toolVersion: '1',
+          arguments: { container: 'nginx-lb' },
+          target: { kind: 'container', canonicalId: 'nginx-lb', display: 'nginx-lb' },
+          purpose: 'read bounded Nginx configuration from nginx-lb',
+          expectedObservation: 'Nginx configuration content'
+        }
+      }
+    }
+    const fact = input.workingMemory.facts[0]
+    return {
+      ...base,
+      goalStatus: 'complete',
+      knownFactIds: fact ? [fact.factId] : [],
+      completionCriteria: []
+    }
+  }
   if (scenario.kind === 'verification_failure') {
     return {
       ...base,
@@ -263,8 +301,8 @@ function decisionFor (scenario, input, turn) {
             checkId: 'check_nginx_active',
             description: 'nginx must be active',
             intent: {
-              toolName: 'service.status',
-              arguments: { service: 'nginx' },
+              toolName: 'shell.review_exec',
+              arguments: { command: 'systemctl show --no-pager --property=Id,LoadState,ActiveState,SubState,MainPID,ExecMainStatus -- nginx' },
               target: { kind: 'service', canonicalId: 'nginx', display: 'nginx' },
               purpose: 'verify nginx state'
             },

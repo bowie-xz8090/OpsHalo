@@ -68,10 +68,8 @@ export default class Sessions extends Component {
         width,
         height,
         ...pick(this.props, [
-          'resolutions',
           'hideDelKeyTip',
           'fileOperation',
-          'pinnedQuickCommandBar',
           'tabsHeight',
           'appPath',
           'leftSidePanelWidth',

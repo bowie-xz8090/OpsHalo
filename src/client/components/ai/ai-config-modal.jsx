@@ -23,8 +23,13 @@ export default auto(function AIConfigModal ({ store }) {
     return res
   }
 
-  function handleSubmit (values) {
-    window.store.updateConfig(values)
+  async function handleSubmit (values) {
+    const nextConfig = {
+      ...window.store.config,
+      ...values
+    }
+    await window.pre.runGlobalAsync('saveUserConfig', nextConfig)
+    window.store.updateConfig(nextConfig)
     message.success(e('saved') || 'Saved')
     window.store.showAIConfigModal = false
   }

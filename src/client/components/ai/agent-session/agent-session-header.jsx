@@ -8,6 +8,7 @@ import {
 } from '@ant-design/icons'
 import {
   currentAgentActivity,
+  getAgentStepNumber,
   isTerminalAgentStatus
 } from '../../../store/agent-session-view.mjs'
 
@@ -24,41 +25,47 @@ const statusLabels = {
   verifying: '正在验证结论…',
   paused: '任务已暂停',
   complete: '任务已完成',
-  inconclusive: '证据不足',
+  inconclusive: '分析已结束',
   blocked: '操作已阻断',
   partial: '任务部分完成',
   failed: '任务失败',
   cancelled: '任务已取消'
 }
 
-export default function AgentSessionHeader ({ session, onControl, onClose, minimal = false }) {
+export default function AgentSessionHeader ({ session, onControl, onClose, minimal = false, embedded = false, readOnly = false }) {
   const [now, setNow] = useState(Date.now())
   const terminal = isTerminalAgentStatus(session.status)
+  const settled = terminal || readOnly
   useEffect(() => {
-    if (terminal || session.status === 'paused') return undefined
+    if (settled || session.status === 'paused') return undefined
     const timer = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(timer)
-  }, [terminal, session.status])
+  }, [settled, session.status])
 
-  const elapsed = getLiveElapsed(session, now, terminal)
-  const label = minimal ? currentAgentActivity(session) : (statusLabels[session.status] || session.status)
+  const elapsed = getLiveElapsed(session, now, settled)
+  const resolvedDecision = session._embeddedResolvedDecision
+  let label = statusLabels[session.status] || session.status
+  if (minimal) label = currentAgentActivity(session)
+  if (readOnly) label = '已执行步骤'
+  if (terminal) label = '已结束'
+  if (resolvedDecision) label = resolvedDecision.choice === 'reject' ? '已拒绝步骤' : '已执行步骤'
   return (
     <header className={`agent-session-header${minimal ? ' is-minimal' : ''}`} role='status' aria-live='polite'>
       <div className='agent-session-status'>
-        {!terminal && session.status !== 'paused'
+        {!settled && session.status !== 'paused'
           ? <span className='agent-session-spinner' aria-hidden='true' />
           : <span className={`agent-session-state-dot is-${session.status}`} aria-hidden='true' />}
         <strong>{label}</strong>
         {!minimal && (
           <span className='agent-session-meta'>
-            {session.budget?.reactSteps?.used || 0}/{session.budget?.reactSteps?.max || 12} 步
+            第 {getAgentStepNumber(session)} 步
             <span aria-hidden='true'> · </span>
             {formatDuration(elapsed)}
           </span>
         )}
       </div>
       <div className='agent-session-controls'>
-        {!terminal && (session.status === 'paused'
+        {!readOnly && !terminal && (session.status === 'paused'
           ? (
             <Tooltip title='继续任务'>
               <Button type='text' size='small' aria-label='继续任务' icon={<PlayCircleOutlined />} onClick={() => onControl('resume')} />
@@ -71,7 +78,7 @@ export default function AgentSessionHeader ({ session, onControl, onClose, minim
                 </Tooltip>
                 )
               : null)}
-        {!terminal && (
+        {!readOnly && !terminal && (
           <Tooltip title='停止 AI（Ctrl+C）'>
             <Button
               type='text'
@@ -84,16 +91,18 @@ export default function AgentSessionHeader ({ session, onControl, onClose, minim
             />
           </Tooltip>
         )}
-        <Tooltip title={terminal ? '关闭结果' : '关闭并停止 AI'}>
-          <Button
-            type='text'
-            size='small'
-            className='agent-close-button'
-            aria-label={terminal ? '关闭 AI 结果' : '关闭并停止 AI'}
-            icon={<CloseOutlined />}
-            onClick={onClose}
-          />
-        </Tooltip>
+        {!embedded && (
+          <Tooltip title={terminal ? '关闭结果' : '关闭并停止 AI'}>
+            <Button
+              type='text'
+              size='small'
+              className='agent-close-button'
+              aria-label={terminal ? '关闭 AI 结果' : '关闭并停止 AI'}
+              icon={<CloseOutlined />}
+              onClick={onClose}
+            />
+          </Tooltip>
+        )}
       </div>
     </header>
   )

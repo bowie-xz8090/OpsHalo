@@ -28,10 +28,12 @@ const ToolDefinitionSchema = z.strictObject({
   maxTimeoutMs: z.number().int().positive().max(900000),
   maxRawCaptureBytes: z.number().int().positive().max(16 * 1024 * 1024),
   maxModelOutputBytes: z.number().int().positive().max(8192),
+  parallelSafe: z.boolean().default(false),
   supportsCancel: z.boolean(),
   supportsDryRun: z.boolean(),
   inputSchema: z.record(z.string(), z.unknown()),
   resultSchema: z.record(z.string(), z.unknown()),
+  resultEncoding: z.enum(['json', 'text']).default('json'),
   parserId: z.string().min(1).max(128)
 }).superRefine((value, ctx) => {
   if (value.defaultTimeoutMs > value.maxTimeoutMs) {
@@ -58,6 +60,22 @@ const NormalizedIntentSchema = ToolIntentSchema.extend({
   redactedDisplay: z.string().min(1).max(16000),
   intentDigest: z.string().length(64),
   commandAnalysis: z.record(z.string(), z.unknown()).optional()
+})
+
+const ReadProbeBundleSchema = z.strictObject({
+  schemaVersion: VersionSchema,
+  bundleId: IdSchema,
+  actions: z.array(z.strictObject({
+    intent: ToolIntentSchema,
+    dependsOn: z.array(IdSchema).max(3).default([])
+  })).min(2).max(3)
+}).superRefine((value, ctx) => {
+  const ids = new Set(value.actions.map(item => item.intent.invocationId))
+  for (const [index, action] of value.actions.entries()) {
+    if (action.dependsOn.some(id => !ids.has(id) || id === action.intent.invocationId)) {
+      ctx.addIssue({ code: 'custom', path: ['actions', index, 'dependsOn'], message: 'bundle dependency must reference another action' })
+    }
+  }
 })
 
 const PolicyDecisionSchema = z.strictObject({
@@ -100,6 +118,7 @@ module.exports = {
   ToolDefinitionSchema,
   ToolIntentSchema,
   NormalizedIntentSchema,
+  ReadProbeBundleSchema,
   PolicyDecisionSchema,
   ExecutionResultSchema
 }

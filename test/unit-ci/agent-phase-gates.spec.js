@@ -22,7 +22,9 @@ test('G0 runtime baseline is pinned and defaults fail closed', () => {
 })
 
 test('G1-G3 execution boundaries and UI cancellation adapters are present', () => {
-  assert.match(source('src/client/components/ai/agent-tools.js'), /Legacy Renderer Agent tool execution is disabled/)
+  assert.equal(fs.existsSync(path.join(root, 'src/client/components/ai/agent-tools.js')), false)
+  assert.doesNotMatch(source('src/client/components/ai/agent.js'), /AIchatWithTools|executeToolCall|agent-tools/)
+  assert.match(source('src/client/components/ai/agent.js'), /startAgentSession/)
   assert.match(source('src/app/widgets/widget-mcp-server.js'), /assertLegacyMcpGatewayBoundary/)
   assert.match(source('src/app/server/agent-dispatch.js'), /verifyExternal/)
   assert.match(source('src/app/server/session-api.js'), /verifyExternal/)

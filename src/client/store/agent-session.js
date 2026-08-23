@@ -9,14 +9,13 @@ export class AgentSessionProjection {
     this.activeByTab = new Map()
     this.listeners = new Map()
     this.waiters = new Map()
-    this.dismissedTasks = new Set()
     this.unsubscribeApi = this.api?.onEvent?.(event => this.applyEvent(event))
   }
 
   async start (request) {
     const response = await this.api.start(request)
     const data = await this.api.getSnapshot({ schemaVersion: 1, taskId: response.taskId, afterSequence: 0 })
-    this.replaceSnapshotWithTimeline(data.snapshot, data.deltaEvents || [])
+    this.replaceSnapshotWithTimeline(data.snapshot, data.deltaEvents || [], { activate: true })
     return response
   }
 
@@ -25,33 +24,42 @@ export class AgentSessionProjection {
     listeners.add(listener)
     this.listeners.set(tabId, listeners)
     const taskId = this.activeByTab.get(tabId)
-    if (taskId && this.sessions.has(taskId) && !this.dismissedTasks.has(taskId)) listener(this.sessions.get(taskId))
+    if (taskId && this.sessions.has(taskId) && !isIncompleteTerminalSession(this.sessions.get(taskId))) {
+      listener(this.sessions.get(taskId))
+    }
     return () => {
       listeners.delete(listener)
       if (!listeners.size) this.listeners.delete(tabId)
     }
   }
 
-  replaceSnapshot (snapshot) {
+  replaceSnapshot (snapshot, { activate = false } = {}) {
     const previous = this.sessions.get(snapshot.taskId)
+    const latestTranscript = snapshot.latestObservation?.terminalTranscript
     const value = {
       ...snapshot,
       timeline: snapshot.timeline?.length ? snapshot.timeline : (previous?.timeline || []),
       _ui: previous?._ui || { expandedSteps: {}, selectedEvidence: null },
       _activity: snapshot.activity || previous?._activity,
+      _terminalTranscript: latestTranscript
+        ? { invocationId: snapshot.latestObservation.invocationId, ...latestTranscript }
+        : previous?._terminalTranscript,
       _startedAt: previous?._startedAt || Date.now() - (snapshot.budget?.elapsedMs || 0),
       _projectedAt: Date.now()
     }
     this.sessions.set(value.taskId, value)
-    this.activeByTab.set(value.binding.tabId, value.taskId)
-    this.notify(value)
+    const activeTaskId = this.activeByTab.get(value.binding.tabId)
+    if (activate || !activeTaskId || activeTaskId === value.taskId) {
+      this.activeByTab.set(value.binding.tabId, value.taskId)
+    }
+    if (!isIncompleteTerminalSession(value)) this.notify(value)
     return value
   }
 
-  replaceSnapshotWithTimeline (snapshot, events) {
+  replaceSnapshotWithTimeline (snapshot, events, options) {
     const previous = this.sessions.get(snapshot.taskId)
     const timeline = (events || []).reduce((items, event) => projectTimeline(items, event), previous?.timeline || [])
-    return this.replaceSnapshot({ ...snapshot, timeline })
+    return this.replaceSnapshot({ ...snapshot, timeline }, options)
   }
 
   async applyEvent (event) {
@@ -68,7 +76,7 @@ export class AgentSessionProjection {
     }
     session = this.project(session, event)
     this.sessions.set(session.taskId, session)
-    this.notify(session)
+    if (!isIncompleteTerminalSession(session)) this.notify(session)
   }
 
   project (session, event) {
@@ -79,7 +87,26 @@ export class AgentSessionProjection {
     }
     if (event.type === 'session.paused') next = { ...next, status: 'paused', statusReason: { code: event.payload.reason?.code, message: event.payload.reason?.safeMessage } }
     if (event.type === 'session.resumed') next.status = 'planning'
-    if (event.type === 'harness.progress') next._activity = event.payload
+    if (event.type === 'harness.progress' || event.type === 'provider.phase') next._activity = event.payload
+    if (event.type === 'provider.session_started') next.providerSession = event.payload
+    if (event.type === 'usage.updated') next.usage = event.payload
+    if (event.type === 'knowledge.retrieved') {
+      const citations = [...(next.knowledgeCitations || []), ...(event.payload.citations || [])]
+      next.knowledgeCitations = [...new Map(citations.map(item => [`${item.sourceId}:${item.chunkId}:${item.sourceVersion}`, item])).values()].slice(-100)
+    }
+    if (event.type === 'assistant.delta') {
+      const current = next.assistantResponse?.responseId === event.payload.responseId ? next.assistantResponse : { responseId: event.payload.responseId, text: '', status: 'streaming' }
+      next.assistantResponse = { ...current, text: `${current.text || ''}${event.payload.delta || ''}`, status: 'streaming' }
+    }
+    if (event.type === 'assistant.completed') {
+      next.assistantResponse = { responseId: event.payload.responseId, text: event.payload.text || next.assistantResponse?.text || '', status: 'completed' }
+    }
+    if (event.type === 'observation.ready' && event.payload.terminalTranscript) {
+      next._terminalTranscript = {
+        invocationId: event.payload.invocationId,
+        ...event.payload.terminalTranscript
+      }
+    }
     if (event.type === 'plan.updated') next.plan = event.payload
     if (event.type === 'budget.updated') next.budget = event.payload
     if (event.type === 'approval.requested') {
@@ -129,8 +156,8 @@ export class AgentSessionProjection {
       await this.waitForTaskStatus(taskId, status => terminalStatuses.has(status), 125000)
     }
     const data = await this.api.getSnapshot({ schemaVersion: 1, taskId, afterSequence: session.lastEventSequence })
-    this.replaceSnapshotWithTimeline(data.snapshot, data.deltaEvents || [])
-    return result
+    const snapshot = this.replaceSnapshotWithTimeline(data.snapshot, data.deltaEvents || [])
+    return { ...result, snapshot }
   }
 
   getEvidence (request) {
@@ -142,9 +169,11 @@ export class AgentSessionProjection {
   }
 
   notify (session) {
-    if (!this.dismissedTasks.has(session.taskId)) {
-      for (const listener of this.listeners.get(session.binding.tabId) || []) listener(session)
+    const projected = {
+      ...session,
+      _tabActive: this.activeByTab.get(session.binding.tabId) === session.taskId
     }
+    for (const listener of this.listeners.get(session.binding.tabId) || []) listener(projected)
     const waiters = this.waiters.get(session.taskId)
     if (!waiters) return
     for (const waiter of [...waiters]) {
@@ -172,14 +201,6 @@ export class AgentSessionProjection {
     })
   }
 
-  dismiss (taskId) {
-    const session = this.sessions.get(taskId)
-    if (!session) return false
-    this.dismissedTasks.add(taskId)
-    for (const listener of this.listeners.get(session.binding.tabId) || []) listener(null)
-    return true
-  }
-
   dispose () {
     this.unsubscribeApi?.()
     this.listeners.clear()
@@ -193,6 +214,10 @@ export class AgentSessionProjection {
   }
 }
 
+function isIncompleteTerminalSession (session) {
+  return terminalStatuses.has(session?.status) && !session.finalResult
+}
+
 let projection
 
 export default Store => {
@@ -200,7 +225,6 @@ export default Store => {
   Store.prototype.startAgentSession = request => projection.start(request)
   Store.prototype.subscribeAgentSession = (tabId, listener) => projection.subscribeTab(tabId, listener)
   Store.prototype.controlAgentSession = (taskId, action, extra) => projection.control(taskId, action, extra)
-  Store.prototype.dismissAgentSession = taskId => projection.dismiss(taskId)
   Store.prototype.getAgentEvidence = request => projection.getEvidence(request)
   Store.prototype.deleteAgentEvidence = request => projection.deleteEvidence(request)
   Store.prototype.isAgentActive = tabId => {

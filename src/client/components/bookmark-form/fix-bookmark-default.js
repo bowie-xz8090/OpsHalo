@@ -13,46 +13,11 @@ const defaultValues = {
     encode: 'utf8',
     envLang: 'en_US.UTF-8',
     username: 'root'
-  },
-  telnet: {
-    port: 23
-  },
-  serial: {
-    baudRate: 9600,
-    dataBits: 8,
-    stopBits: 1,
-    parity: 'none',
-    rtscts: false,
-    xon: false,
-    xoff: false,
-    xany: false
-  },
-  vnc: {
-    port: 5900,
-    viewOnly: false,
-    clipViewport: false,
-    scaleViewport: true,
-    qualityLevel: 3,
-    compressionLevel: 1,
-    shared: true
-  },
-  rdp: {
-    port: 3389
-  },
-  ftp: {
-    port: 21,
-    secure: false
   }
 }
 
 const requiredFields = {
-  ssh: ['host'],
-  telnet: ['host'],
-  serial: ['path'],
-  vnc: ['host'],
-  rdp: ['host'],
-  ftp: ['host'],
-  web: ['url']
+  ssh: ['host']
 }
 
 export function fixBookmarkData (data) {
@@ -96,8 +61,15 @@ export function validateBookmarkData (data) {
   }
 
   const type = data.type || 'ssh'
-  const required = requiredFields[type] || []
+  const required = requiredFields[type]
   const errors = []
+
+  if (!required) {
+    return {
+      valid: false,
+      errors: [`Unsupported bookmark type: ${type}`]
+    }
+  }
 
   for (const field of required) {
     if (!data[field]) {

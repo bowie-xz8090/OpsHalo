@@ -7,21 +7,13 @@ import {
   PlayCircleOutlined
 } from '@ant-design/icons'
 import classnames from 'classnames'
-import AgentSessionOverlay from '../ai/agent-session/agent-session-overlay'
 
 export default function TerminalSmartShellOverlay ({
   proposal,
-  agentSession,
   anchor,
   onExecute,
   onSave,
-  onReject,
-  onAgentControl,
-  getAgentEvidence,
-  deleteAgentEvidence,
-  onAgentHandoff,
-  onAgentFollowUp,
-  onAgentClose
+  onReject
 }) {
   const [editing, setEditing] = useState(false)
   const [draftCommand, setDraftCommand] = useState('')
@@ -33,10 +25,10 @@ export default function TerminalSmartShellOverlay ({
     const initialCommand = String(proposal.editableCommand || proposal.command || '')
     setDraftCommand(initialCommand)
     setEditing(!initialCommand.trim() && proposal.status !== 'pending')
-  }, [proposal?.id, proposal?.command, proposal?.editableCommand, proposal?.status, agentSession?.taskId])
+  }, [proposal?.id, proposal?.command, proposal?.editableCommand, proposal?.status])
 
   useEffect(() => {
-    if (!proposal || agentSession) {
+    if (!proposal) {
       return undefined
     }
     function handleKeyDown (e) {
@@ -51,7 +43,7 @@ export default function TerminalSmartShellOverlay ({
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [proposal, editing, onReject, agentSession])
+  }, [proposal, editing, onReject])
 
   const command = editing ? draftCommand : String(proposal?.command || '')
   const trimmedCommand = command.trim()
@@ -64,48 +56,26 @@ export default function TerminalSmartShellOverlay ({
   const notes = useMemo(() => {
     return Array.isArray(proposal?.notes) ? proposal.notes.filter(Boolean) : []
   }, [proposal?.notes])
-
   const overlayStyle = useMemo(() => {
     if (!anchor) {
       return undefined
     }
     const scale = anchor.scale || 1
     const height = anchor.height || anchor.maxHeight
-    const agentWidth = Math.min(1200, anchor.width)
     return {
       top: anchor.top,
       left: anchor.left,
-      width: agentSession ? agentWidth : anchor.width,
+      width: anchor.width,
       height: height ? `${height}px` : undefined,
-      maxHeight: height ? `${height}px` : undefined,
+      maxWidth: anchor.maxWidth ? `${anchor.maxWidth}px` : undefined,
+      maxHeight: anchor.maxHeight ? `${anchor.maxHeight}px` : undefined,
       fontSize: `${anchor.fontSize || 14}px`,
       '--smart-shell-scale': String(scale),
       '--smart-shell-height': height ? `${height}px` : undefined
     }
-  }, [anchor, agentSession])
+  }, [anchor])
 
-  if (!proposal && !agentSession) {
-    return null
-  }
-
-  if (agentSession) {
-    return (
-      <div
-        className='terminal-smart-shell-overlay is-anchored is-agent-session'
-        style={overlayStyle}
-      >
-        <AgentSessionOverlay
-          session={agentSession}
-          onControl={onAgentControl}
-          getEvidence={getAgentEvidence}
-          deleteEvidence={deleteAgentEvidence}
-          onHandoff={onAgentHandoff}
-          onFollowUp={onAgentFollowUp}
-          onClose={onAgentClose}
-        />
-      </div>
-    )
-  }
+  if (!proposal) return null
 
   function handleModify () {
     setDraftCommand(String(proposal.command || proposal.editableCommand || ''))

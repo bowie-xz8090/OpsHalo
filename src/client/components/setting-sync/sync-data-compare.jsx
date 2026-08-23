@@ -36,7 +36,8 @@ export default function SyncDataCompare (props) {
   const { comparison: comp } = comparison
 
   // Filter only items with differences
-  const diffs = comp.filter(item => item.onlyLocal > 0 || item.onlyServer > 0)
+  const visibleDataTypes = new Set(['bookmarks', 'bookmarkGroups', 'terminalThemes', 'addressBookmarks', 'workspaces'])
+  const diffs = comp.filter(item => visibleDataTypes.has(item.name) && (item.onlyLocal > 0 || item.onlyServer > 0))
 
   if (diffs.length === 0) {
     return (
@@ -50,8 +51,6 @@ export default function SyncDataCompare (props) {
     bookmarks: e('bookmarks') || 'Bookmarks',
     bookmarkGroups: 'Bookmark Groups',
     terminalThemes: e('terminalThemes') || 'Terminal Themes',
-    quickCommands: e('quickCommands') || 'Quick Commands',
-    profiles: e('profiles') || 'Profiles',
     addressBookmarks: e('addressBookmarks') || 'Address Bookmarks',
     workspaces: e('workspaces') || 'Workspaces'
   }

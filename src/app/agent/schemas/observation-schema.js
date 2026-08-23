@@ -2,6 +2,22 @@ const { z } = require('zod')
 const { ExecutionStatusSchema } = require('./enums')
 const { VersionSchema, IdSchema, IsoDateSchema, AgentErrorSchema } = require('./shared')
 
+const EvidenceRangeSchema = z.strictObject({
+  evidenceId: z.string().min(1).max(1000),
+  start: z.number().int().nonnegative(),
+  end: z.number().int().nonnegative()
+}).refine(value => value.end >= value.start, { message: 'Evidence range end precedes start' })
+
+const FactCandidateSchema = z.strictObject({
+  id: IdSchema,
+  statement: z.string().min(1).max(2000),
+  kind: z.enum(['identity', 'state', 'metric', 'relationship', 'error', 'absence']),
+  confidence: z.enum(['exact', 'parsed', 'heuristic']),
+  evidence: z.array(EvidenceRangeSchema).min(1).max(50),
+  parserId: z.string().min(1).max(120),
+  observedAt: IsoDateSchema
+})
+
 const FactRecordSchema = z.strictObject({
   factId: IdSchema,
   statement: z.string().min(1).max(2000),
@@ -17,7 +33,12 @@ const ExtractedFactSchema = z.strictObject({
   statement: z.string().min(1).max(2000),
   confidence: z.enum(['observed', 'inferred']),
   evidenceRef: z.string().min(1).max(1000),
-  sourcePath: z.string().max(1000).optional()
+  sourcePath: z.string().max(1000).optional(),
+  parserId: z.string().max(120).optional(),
+  evidenceRange: z.strictObject({
+    start: z.number().int().nonnegative(),
+    end: z.number().int().nonnegative()
+  }).optional()
 })
 
 const ObservationSchema = z.strictObject({
@@ -28,6 +49,7 @@ const ObservationSchema = z.strictObject({
   exitCode: z.number().int().nullable(),
   summary: z.string().max(1200),
   facts: z.array(ExtractedFactSchema).max(100),
+  factCandidates: z.array(FactCandidateSchema).max(100).default([]),
   resultView: z.strictObject({
     kind: z.enum(['list', 'record']),
     columns: z.array(z.string().max(120)).max(30),
@@ -37,6 +59,11 @@ const ObservationSchema = z.strictObject({
     query: z.string().max(200).optional(),
     partial: z.boolean(),
     displayTruncated: z.boolean().optional()
+  }).optional(),
+  terminalTranscript: z.strictObject({
+    stdout: z.string().max(65536),
+    stderr: z.string().max(65536),
+    exitCode: z.number().int().nullable()
   }).optional(),
   errors: z.array(AgentErrorSchema).max(50),
   sample: z.array(z.strictObject({
@@ -79,4 +106,10 @@ const EvidenceRecordSchema = z.strictObject({
   relativePath: z.string().min(1).max(2048)
 })
 
-module.exports = { FactRecordSchema, ObservationSchema, EvidenceRecordSchema }
+module.exports = {
+  EvidenceRangeSchema,
+  FactCandidateSchema,
+  FactRecordSchema,
+  ObservationSchema,
+  EvidenceRecordSchema
+}

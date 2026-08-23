@@ -1,5 +1,5 @@
 /**
- * terminal/sftp/serial class
+ * SSH terminal session
  */
 
 const proxySock = require('./socks')

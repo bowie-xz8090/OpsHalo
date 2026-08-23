@@ -33,7 +33,7 @@ function normalizeArguments (argumentsValue) {
 function normalizeIntent (intent, definition, validatedArguments) {
   const parsed = ToolIntentSchema.parse(intent)
   const normalizedArguments = normalizeArguments(validatedArguments)
-  const commandAnalysis = definition.name === 'shell.exec' || definition.parserId === 'shell'
+  const commandAnalysis = definition.name === 'shell.exec' || definition.parserId === 'shell' || definition.parserId === 'shell_review'
     ? analyzeShell(normalizedArguments.command)
     : undefined
   const digestValue = {
@@ -47,7 +47,7 @@ function normalizeIntent (intent, definition, validatedArguments) {
     verificationPlan: parsed.verificationPlan
   }
   const intentDigest = crypto.createHash('sha256').update(JSON.stringify(stable(digestValue))).digest('hex')
-  const redactedDisplay = definition.name === 'shell.exec'
+  const redactedDisplay = definition.name === 'shell.exec' || definition.parserId === 'shell_review'
     ? String(normalizedArguments.command)
     : JSON.stringify(normalizedArguments, null, 2)
   return NormalizedIntentSchema.parse({

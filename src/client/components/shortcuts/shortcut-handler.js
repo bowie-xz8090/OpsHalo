@@ -190,6 +190,11 @@ export function shortcutExtend (Cls) {
       !altKey &&
       !ctrlKey
     ) {
+      if (this.captureAgentTerminalInput?.('\x7f')) {
+        event.preventDefault()
+        event.stopPropagation()
+        return false
+      }
       this.props.onDelKeyPressed()
       const delKey = this.props.config.backspaceMode === '^?' ? 8 : 127
       const altDelDelKey = delKey === 8 ? 127 : 8
@@ -206,6 +211,11 @@ export function shortcutExtend (Cls) {
       !altKey &&
       !metaKey
     ) {
+      if (this.props.config.agentModeEnabled === true && this.shouldInterceptSmartShellEnter?.(true)) {
+        event.preventDefault()
+        event.stopPropagation()
+        return false
+      }
       event.preventDefault()
       event.stopPropagation()
       const shiftEnterText = processEscapeSequences(this.props.config.shiftEnterMode || '\\n')
@@ -268,11 +278,6 @@ export function shortcutExtend (Cls) {
       // Cancel trzsz transfer if active
       if (this.trzszClient && this.trzszClient.isActive) {
         this.trzszClient.cancel()
-        return false
-      }
-      // Cancel xmodem transfer if active
-      if (this.xmodemClient && this.xmodemClient.isActive) {
-        this.xmodemClient.cancel()
         return false
       }
       if (!event.__electermAiCtrlCHandled) {
@@ -341,14 +346,6 @@ export function shortcutExtend (Cls) {
     const shortcutsConfig = buildConfig(this.props.config, d => !d.hidden)
     const keys = Object.keys(shortcutsConfig)
     const len = keys.length
-
-    if (this.term) {
-      const qmMatch = window.store.quickCommands.find(d => d.shortcut === r)
-      if (qmMatch) {
-        window.store.runQuickCommandItem(qmMatch.id)
-        return false
-      }
-    }
 
     for (let i = 0; i < len; i++) {
       const k = keys[i]

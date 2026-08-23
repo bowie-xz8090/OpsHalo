@@ -196,16 +196,6 @@ rebuild_native_modules() {
     done
     cd "$cross_build_dir"
 
-    # Build @serialport/bindings-cpp
-    log_info "Building @serialport/bindings-cpp for loong64..."
-    mkdir -p build-serialport && cd build-serialport
-    npm init -y 2>/dev/null
-    npm_config_arch=loong64 npm_config_target_arch=loong64 CC=loongarch64-linux-gnu-gcc CXX=loongarch64-linux-gnu-g++ npm install @serialport/bindings-cpp --build-from-source 2>&1 | tail -5
-    find . -path "*/build/Release/bindings.node" -type f | while read f; do
-        cp "$f" "$native_modules_dir/serialport-bindings.node"
-    done
-    cd "$cross_build_dir"
-
     unset CC CXX AR RANLIB LINK GYP_DEFINES npm_config_arch npm_config_target_arch
 
     if [ -d "$native_modules_dir" ] && [ "$(ls -A "$native_modules_dir" 2>/dev/null)" ]; then
@@ -264,9 +254,6 @@ merge_loong64() {
         log_info "Replacing native modules with loong64 versions..."
         if [ -f "$native_modules_dir/node-pty.node" ]; then
             find "$output_dir" -path "*/node-pty/build/Release/*.node" -exec cp "$native_modules_dir/node-pty.node" {} \; 2>/dev/null || true
-        fi
-        if [ -f "$native_modules_dir/serialport-bindings.node" ]; then
-            find "$output_dir" -path "*@serialport/bindings-cpp*" -name "*.node" -exec cp "$native_modules_dir/serialport-bindings.node" {} \; 2>/dev/null || true
         fi
         if [ -f "$native_modules_dir/ssh2-crypto.node" ]; then
             find "$output_dir" -path "*@electerm/ssh2*" -name "*.node" -exec cp "$native_modules_dir/ssh2-crypto.node" {} \; 2>/dev/null || true
@@ -361,7 +348,7 @@ Terminal=false
 Type=Application
 Categories=Development;System;TerminalEmulator;
 StartupWMClass=electerm
-MimeType=x-scheme-handler/ssh;x-scheme-handler/telnet;x-scheme-handler/rdp;x-scheme-handler/vnc;x-scheme-handler/serial;x-scheme-handler/spice;x-scheme-handler/electerm;
+MimeType=x-scheme-handler/ssh;x-scheme-handler/electerm;
 DESKTOP
 
     cat > "$deb_dir/DEBIAN/control" <<CTRL
@@ -372,7 +359,7 @@ Priority: optional
 Architecture: ${deb_arch}
 Depends: libglib2.0-0, libnss3, libnspr4, libdbus-1-3, libatk1.0-0, libatk-bridge2.0-0, libcups2, libcairo2, libpango-1.0-0, libx11-6, libxcomposite1, libxdamage1, libxext6, libxfixes3, libxrandr2, libxkbcommon0, libdrm2, libgbm1, libatspi2.0-0, libpulse0, libgtk-3-0
 Maintainer: ZHAO Xudong <zxdong@gmail.com>
-Description: Open-sourced terminal/ssh/sftp/telnet/serialport/RDP/VNC/Spice/ftp client
+Description: OpsHalo AI-powered SSH/SFTP operations workbench
 CTRL
 
     cat > "$deb_dir/DEBIAN/postinst" <<'POSTINST'

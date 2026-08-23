@@ -14,7 +14,7 @@ import './connection-list.styl'
 function filterConnections (bookmarks, keyword) {
   const kw = keyword.trim().toLowerCase()
   return bookmarks
-    .filter(b => b && b.host && b.type !== 'local')
+    .filter(b => b && b.host && (!b.type || b.type === 'ssh'))
     .filter(b => {
       if (!kw) return true
       const title = createTitle(b, false).toLowerCase()

@@ -7,7 +7,7 @@ import {
   PlayCircleOutlined
 } from '@ant-design/icons'
 
-export default function AgentApprovalCard ({ approval, onDecision, onRevise }) {
+export default function AgentApprovalCard ({ approval, onDecision, onRevise, resolvedDecision, readOnly = false }) {
   const [editing, setEditing] = useState(false)
   const [command, setCommand] = useState('')
   useEffect(() => {
@@ -24,16 +24,20 @@ export default function AgentApprovalCard ({ approval, onDecision, onRevise }) {
     decidedAt: new Date().toISOString()
   })
   return (
-    <section className='agent-approval-card' role='dialog' aria-label='Agent 操作审批' tabIndex='-1'>
+    <section className={`agent-approval-card${resolvedDecision ? ' is-resolved' : ''}`} role='dialog' aria-label='Agent 操作审批' tabIndex='-1'>
       <div className='agent-approval-head'>
         <div className='agent-approval-title'>
-          {permanentlyBlocked ? '该操作已被安全策略阻断' : '是否同意执行以下操作并查看输出？'}
+          {resolvedDecision
+            ? (resolvedDecision.choice === 'reject' ? '已拒绝以下操作' : '已执行以下操作')
+            : permanentlyBlocked
+              ? '该操作已被安全策略阻断'
+              : '是否同意执行以下操作并查看输出？'}
         </div>
         <div className='agent-approval-actions is-primary'>
-          {!editing && !permanentlyBlocked && allowed.has('approve_once') && (
+          {!readOnly && !resolvedDecision && !editing && !permanentlyBlocked && allowed.has('approve_once') && (
             <Button type='primary' size='small' icon={<PlayCircleOutlined />} onClick={() => decide('approve_once')}>执行</Button>
           )}
-          {approval.toolName === 'shell.exec' && !editing && !permanentlyBlocked && (
+          {!readOnly && !resolvedDecision && approval.toolName === 'shell.exec' && !editing && !permanentlyBlocked && (
             <Button size='small' icon={<EditOutlined />} onClick={() => setEditing(true)}>修改</Button>
           )}
           {editing && (
@@ -48,7 +52,7 @@ export default function AgentApprovalCard ({ approval, onDecision, onRevise }) {
             </Button>
           )}
           {editing && <Button size='small' onClick={() => setEditing(false)}>取消修改</Button>}
-          {allowed.has('reject') && <Button size='small' icon={<CloseOutlined />} onClick={() => decide('reject')}>拒绝</Button>}
+          {!readOnly && !resolvedDecision && allowed.has('reject') && <Button size='small' icon={<CloseOutlined />} onClick={() => decide('reject')}>拒绝</Button>}
         </div>
       </div>
 
@@ -85,7 +89,11 @@ export default function AgentApprovalCard ({ approval, onDecision, onRevise }) {
           <dt>风险原因</dt><dd>{approval.riskReasons?.join('；') || '由工具安全元数据和命令分析确定'}</dd>
         </dl>
       </details>
-      <small className='agent-approval-expiry'>审批将在 {new Date(approval.expiresAt).toLocaleTimeString()} 过期；Enter 和 Escape 不会批准。</small>
+      <small className='agent-approval-expiry'>
+        {resolvedDecision
+          ? `该步骤已${resolvedDecision.choice === 'reject' ? '拒绝' : '执行'}，命令与结果保留在其下方的终端历史中。`
+          : `审批将在 ${new Date(approval.expiresAt).toLocaleTimeString()} 过期；Enter 和 Escape 不会批准。`}
+      </small>
     </section>
   )
 }

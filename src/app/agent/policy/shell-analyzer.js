@@ -1,6 +1,6 @@
 const { matchBuiltinDeny } = require('./builtin-deny-rules')
 
-const knownReadCommands = new Set(['cat', 'grep', 'egrep', 'fgrep', 'head', 'tail', 'sed', 'awk', 'cut', 'sort', 'uniq', 'wc', 'ps', 'pgrep', 'ss', 'netstat', 'lsof', 'df', 'du', 'free', 'uptime', 'uname', 'id', 'whoami', 'hostname', 'date', 'stat', 'ls', 'find', 'journalctl', 'systemctl', 'docker', 'podman', 'ip', 'env', 'printenv', 'readlink', 'realpath'])
+const knownReadCommands = new Set(['cat', 'grep', 'egrep', 'fgrep', 'head', 'tail', 'sed', 'awk', 'cut', 'sort', 'uniq', 'wc', 'ps', 'pgrep', 'ss', 'netstat', 'lsof', 'df', 'du', 'free', 'uptime', 'uname', 'id', 'whoami', 'hostname', 'date', 'stat', 'ls', 'find', 'journalctl', 'systemctl', 'docker', 'podman', 'ip', 'env', 'printenv', 'readlink', 'realpath', 'echo', 'nginx', 'timeout', 'true', 'test', '['])
 const networkCommands = new Set(['curl', 'wget', 'nc', 'ncat', 'netcat', 'ssh', 'scp', 'sftp', 'rsync', 'telnet', 'ftp'])
 const interactiveCommands = new Set(['vim', 'vi', 'nano', 'emacs', 'less', 'more', 'top', 'htop', 'watch', 'man', 'ssh', 'sftp', 'ftp'])
 const mutationCommands = new Set(['rm', 'rmdir', 'mv', 'cp', 'install', 'mkdir', 'touch', 'truncate', 'chmod', 'chown', 'chgrp', 'kill', 'pkill', 'killall', 'reboot', 'shutdown', 'poweroff', 'mount', 'umount', 'apt', 'apt-get', 'dnf', 'yum', 'apk', 'pacman', 'useradd', 'userdel', 'usermod', 'groupadd', 'groupdel'])
@@ -75,7 +75,12 @@ function commandNames (tokens) {
 
 function analyzeShell (command) {
   const raw = String(command || '')
-  const { tokens, parseComplete } = tokenize(raw)
+  const fdMerges = raw.match(/\b\d*>&\d+\b/g) || []
+  const nullRedirects = raw.match(/\b\d*>\s*\/dev\/null\b/g) || []
+  const analysisRaw = raw
+    .replace(/\b\d*>&\d+\b/g, ' ')
+    .replace(/\b\d*>\s*\/dev\/null\b/g, ' ')
+  const { tokens, parseComplete } = tokenize(analysisRaw)
   const names = commandNames(tokens)
   const denyMatches = matchBuiltinDeny(raw)
   const hasWriteRedirect = tokens.some(token => token === '>' || token === '>>')
@@ -139,7 +144,7 @@ function analyzeShell (command) {
     risk = 'R5'
     reasons.push(...denyMatches.map(match => reason(match.id, match.message)))
   }
-  if (/\b(?:find\s+\/|du\s+-[a-z]*s?\s+\/|docker\s+stats\s+(?:--no-stream\s+)?$)/i.test(raw)) {
+  if (/\b(?:find\s+\/(?=\s|$)|du\s+-[a-z]*s?\s+\/(?=\s|$)|docker\s+stats\s+(?:--no-stream\s+)?$)/i.test(raw)) {
     cost = 'C2'
     reasons.push(reason('broad_scope', '查询范围可能显著消耗资源。'))
   }
@@ -149,7 +154,11 @@ function analyzeShell (command) {
     parseComplete,
     commands: names.map(name => ({ name, argv: [], resolvedClass: knownReadCommands.has(name) ? 'read' : networkCommands.has(name) ? 'network' : mutationCommands.has(name) ? 'change' : 'unknown' })),
     pipelines,
-    redirections: tokens.filter(token => ['>', '>>', '<', '<<'].includes(token)).map(operator => ({ operator, targetClass: operator.startsWith('>') ? 'write' : 'read' })),
+    redirections: [
+      ...tokens.filter(token => ['>', '>>', '<', '<<'].includes(token)).map(operator => ({ operator, targetClass: operator.startsWith('>') ? 'write' : 'read' })),
+      ...fdMerges.map(operator => ({ operator, targetClass: 'stream_merge' })),
+      ...nullRedirects.map(operator => ({ operator, targetClass: 'discard' }))
+    ],
     substitutions,
     background,
     interactiveSignals,

@@ -1,7 +1,6 @@
 const express = require('express')
 const { Sftp } = require('./session-sftp')
 const { instSftpKeys } = require('../common/constants')
-const { Ftp } = require('./session-ftp')
 const {
   sftp,
   transfer,
@@ -11,7 +10,6 @@ const {
   cleanAllSessions
 } = require('./remote-common')
 const { Transfer, transferKeys } = require('./transfer')
-const { Transfer: FtpTransfer } = require('./ftp-transfer')
 const app = express()
 const log = require('../common/log')
 const appDec = require('./app-wrap')
@@ -32,7 +30,6 @@ const {
 const wsDec = require('./ws-dec')
 const { zmodemManager } = require('./zmodem')
 const { trzszManager } = require('./trzsz')
-const { xmodemManager } = require('./xmodem')
 
 const {
   tokenElecterm,
@@ -56,54 +53,7 @@ function verify (req) {
 
 appDec(app)
 
-if (type === 'rdp') {
-  app.ws('/rdp/:pid', function (ws, req) {
-    const { width, height } = req.query
-    verify(req)
-    markConnected()
-    const term = terminals(req.params.pid)
-    term.ws = ws
-    log.debug('ws: connected to rdp session ->', term.pid, 'width=', width, 'height=', height)
-    term.start(width, height)
-    ws.on('error', (err) => {
-      log.error('rdp ws error:', err)
-    })
-    ws.on('close', () => {
-      log.debug('ws: rdp session ws closed ->', term.pid)
-      cleanup()
-    })
-  })
-} else if (type === 'vnc') {
-  app.ws('/vnc/:pid', function (ws, req) {
-    const { query } = req
-    verify(req)
-    markConnected()
-    const { pid } = req.params
-    const term = terminals(pid)
-    term.ws = ws
-    term.start(query)
-    log.debug('ws: connected to vnc session ->', pid)
-    ws.on('error', (err) => {
-      log.error(err)
-    })
-    ws.on('close', () => {
-      cleanup()
-    })
-  })
-} else if (type === 'spice') {
-  app.ws('/spice/:pid', function (ws, req) {
-    const { query } = req
-    verify(req)
-    markConnected()
-    const { pid } = req.params
-    const term = terminals(pid)
-    log.debug('ws: connected to spice session ->', pid)
-    term.start(query, ws)
-    ws.on('error', (err) => {
-      log.error(err)
-    })
-  })
-} else {
+if (type === 'ssh' || type === 'remote' || type === 'local' || type === 'terminal') {
   app.ws('/terminals/:pid', function (ws, req) {
     verify(req)
     markConnected()
@@ -145,19 +95,7 @@ if (type === 'rdp') {
         return
       }
 
-      // Detect XMODEM auto-trigger markers from serial device
-      if (term.port) {
-        detectXmodemMarker(combinedData.toString('utf8'))
-      }
-
-      // Check for xmodem protocol before sending to client
-      const xmodemConsumed = xmodemManager.handleData(pid, combinedData, term, ws)
-      if (xmodemConsumed) {
-        sendTimeout = null
-        return
-      }
-
-      // Not zmodem, trzsz, or xmodem data, send to WebSocket
+      // Not zmodem or trzsz data, send to WebSocket
       ws.send(combinedData)
       sendTimeout = null
     }
@@ -165,27 +103,6 @@ if (type === 'rdp') {
     // Create ws.s function for zmodem to send messages to client
     ws.s = (data) => {
       ws.send(JSON.stringify(data))
-    }
-
-    // Auto-trigger XMODEM when the serial device sends a marker message.
-    // The serial-shell.js sends these markers when the user types tx/rx.
-    function detectXmodemMarker (text) {
-      const txMatch = text.match(/\[XMODEM:TX:(.+?)\]/)
-      if (txMatch) {
-        ws.s({
-          action: 'xmodem-event',
-          event: 'auto-trigger-receive',
-          name: txMatch[1]
-        })
-        return
-      }
-      const rxMatch = text.match(/\[XMODEM:RX\]/)
-      if (rxMatch) {
-        ws.s({
-          action: 'xmodem-event',
-          event: 'auto-trigger-send'
-        })
-      }
     }
 
     // In the WebSocket setup, replace the data handler:
@@ -203,24 +120,6 @@ if (type === 'rdp') {
         // Let trzsz handle the data, but still log it
         term.writeLog(data)
         trzszManager.handleData(pid, data, term, ws)
-        return
-      }
-
-      // Detect XMODEM auto-trigger markers from serial device
-      if (term.port) {
-        const text = Buffer.isBuffer(data) ? data.toString('utf8') : data
-        detectXmodemMarker(text)
-      }
-
-      // Check if xmodem session is active and handle data.
-      // For serial terminals (term.port exists) a raw port listener (registered below)
-      // bypasses rxLineEnding transformation and feeds raw bytes to xmodem.
-      if (xmodemManager.isActive(pid)) {
-        if (!term.port) {
-          // Non-serial fallback (should not normally happen)
-          term.writeLog(data)
-          xmodemManager.handleData(pid, data, term, ws)
-        }
         return
       }
 
@@ -242,10 +141,6 @@ if (type === 'rdp') {
         }
         const trzszConsumed = trzszManager.handleData(pid, chunk, term, ws)
         if (trzszConsumed) {
-          return
-        }
-        const xmodemConsumed = xmodemManager.handleData(pid, chunk, term, ws)
-        if (xmodemConsumed) {
           return
         }
         ws.send(chunk)
@@ -276,17 +171,6 @@ if (type === 'rdp') {
       }
     })
 
-    // For serial terminals, register a raw data listener directly on the port to
-    // feed binary XMODEM data to xmodemManager without rxLineEnding transformation.
-    if (term.port) {
-      term.port.on('data', function (rawData) {
-        if (xmodemManager.isActive(pid)) {
-          term.writeLog(rawData)
-          xmodemManager.handleData(pid, rawData, term, ws)
-        }
-      })
-    }
-
     let onCloseCalled = false
     function onClose () {
       if (onCloseCalled) return
@@ -301,8 +185,6 @@ if (type === 'rdp') {
       zmodemManager.destroySession(pid)
       // Clean up trzsz session
       trzszManager.destroySession(pid)
-      // Clean up xmodem session
-      xmodemManager.destroySession(pid)
       term.kill()
       log.debug('Closed terminal ' + pid)
       // Clean things up
@@ -327,10 +209,6 @@ if (type === 'rdp') {
             }
             if (parsed.action === 'trzsz-event') {
               trzszManager.handleMessage(pid, parsed, term, ws)
-              return
-            }
-            if (parsed.action === 'xmodem-event') {
-              xmodemManager.handleMessage(pid, parsed, term, ws)
               return
             }
             if (parsed.action === 'keepalive') {
@@ -373,8 +251,11 @@ if (type === 'rdp') {
 
       if (action === 'sftp-new') {
         const { id, terminalId, type } = msg
-        const Cls = type === 'ftp' ? Ftp : Sftp
-        sftp(id, new Cls({
+        if (type !== 'sftp') {
+          ws.s({ id, error: { message: `unsupported file session type: ${type}`, stack: '' } })
+          return
+        }
+        sftp(id, new Sftp({
           uid: id,
           terminalId,
           type
@@ -435,19 +316,17 @@ if (type === 'rdp') {
       const { action } = msg
 
       if (action === 'transfer-new') {
-        const { sftpId, id, isFtp } = msg
+        const { sftpId, id } = msg
         const session = sftp(sftpId)
         const encode = session.initOptions?.encode || 'utf8'
         const opts = Object.assign({}, msg, {
           sftp: session.sftp,
           conn: session.client,
-          ftpSession: isFtp ? session : null,
           sftpId,
           ws,
           encode
         })
-        const Cls = isFtp ? FtpTransfer : Transfer
-        transfer(id, sftpId, new Cls(opts))
+        transfer(id, sftpId, new Transfer(opts))
       } else if (action === 'transfer-func') {
         const { id, func, args, sftpId } = msg
         if (func === 'destroy') {
@@ -514,7 +393,9 @@ process.on('message', async (message) => {
     } else if (action === 'agent-describe-session') {
       promise = require('./session-api').describeAgentSession(body)
     } else if (action === 'agent-exec-cmd') {
-      promise = require('./session-api').agentExecCmd(body)
+      promise = require('./session-api').agentExecCmd(body, progress => {
+        process.send({ id, progress })
+      })
     } else if (action === 'agent-sftp') {
       promise = require('./session-api').agentSftp(body)
     } else if (action === 'agent-cancel-exec') {

@@ -80,12 +80,24 @@ test('blank AI defaults recover the newest protected API configuration without o
 
 test('AI settings submission keeps hidden backend values and refreshes live Agent flags', () => {
   const formSource = fs.readFileSync(path.join(__dirname, '../../src/client/components/ai/ai-config.jsx'), 'utf8')
+  const modalSource = fs.readFileSync(path.join(__dirname, '../../src/client/components/ai/ai-config-modal.jsx'), 'utf8')
   const runtimeSource = fs.readFileSync(path.join(__dirname, '../../src/app/agent/index.js'), 'utf8')
+  const refreshSource = fs.readFileSync(path.join(__dirname, '../../src/app/agent/runtime-config-refresh.js'), 'utf8')
   const persistenceSource = fs.readFileSync(path.join(__dirname, '../../src/app/lib/user-config-controller.js'), 'utf8')
   assert.match(formSource, /const normalized = \{\s*\.\.\.initialValues,\s*\.\.\.values,/)
-  assert.match(runtimeSource, /refreshConfig: nextConfig =>/)
-  assert.match(runtimeSource, /manager\.sessions\.values\(\).*runtime => !runtime\.finished/)
+  assert.match(formSource, /await onSubmit\(normalized\)/)
+  assert.match(modalSource, /await window\.pre\.runGlobalAsync\('saveUserConfig', nextConfig\)/)
+  assert.ok(modalSource.indexOf("await window.pre.runGlobalAsync('saveUserConfig', nextConfig)") < modalSource.indexOf('message.success'))
+  assert.match(runtimeSource, /refreshConfig: nextConfig => configRefresher\.refresh\(nextConfig\)/)
+  assert.match(refreshSource, /status !== 'paused'/)
+  assert.match(refreshSource, /pendingConfig = config/)
   assert.match(persistenceSource, /getAgentRuntime\(\)\?\.refreshConfig\(userConfig\)/)
+})
+
+test('Electron E2E data is isolated from the real OpsHalo user database', () => {
+  const appOptionsSource = fs.readFileSync(path.join(__dirname, '../e2e/common/app-options.js'), 'utf8')
+  assert.match(appOptionsSource, /DATA_PATH:\s*e2eDataPath/)
+  assert.match(appOptionsSource, /\.opshalo-e2e-data/)
 })
 
 test('Harness factory pins one backend per task and never selects compatible fallback for Codex', async () => {
@@ -458,7 +470,7 @@ test('Codex adapter streams safe lifecycle progress before the structured decisi
   const adapter = new CodexAppServerHarnessAdapter({ manager, profileId: 'codex_profile_12345' })
   const events = []
   for await (const event of adapter.runTurn({ taskId: 'task_progress_12345' })) events.push(event)
-  assert.deepEqual(events.map(event => event.type), ['status', 'status', 'decision'])
+  assert.deepEqual(events.map(event => event.type), ['phase', 'phase', 'decision.completed'])
   assert.equal(events[0].phase, 'connecting')
   assert.equal(events[2].decision.goalStatus, 'need_user')
 })

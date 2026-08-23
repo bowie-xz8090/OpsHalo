@@ -69,9 +69,43 @@ function reconcileObservation (memory, observation) {
   return {
     ...memory,
     facts: boundedFacts,
+    missingInformation: resolveMissingInformation(memory.missingInformation, boundedFacts),
     contradictions: detectContradictions(boundedFacts, memory.contradictions),
     recentObservationIds: [...memory.recentObservationIds, observation.observationId].slice(-4)
   }
+}
+
+function resolveMissingInformation (items = [], facts = []) {
+  return items.filter(item => !facts.some(fact => statementSatisfiesGap(fact.statement, item)))
+}
+
+function statementSatisfiesGap (statement, gap) {
+  const normalizedStatement = normalizeComparableText(statement)
+  const normalizedGap = normalizeComparableText(gap)
+  if (!normalizedGap || !normalizedStatement) return false
+  if (normalizedStatement.includes(normalizedGap)) return true
+  const gapTokens = comparableTokens(normalizedGap)
+  if (!gapTokens.length) return false
+  const statementTokens = new Set(comparableTokens(normalizedStatement))
+  const matched = gapTokens.filter(token => statementTokens.has(token))
+  return matched.length >= 2 && matched.length / gapTokens.length >= 0.6
+}
+
+function normalizeComparableText (value) {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9\u3400-\u9fff]+/g, ' ').trim()
+}
+
+function comparableTokens (value) {
+  const words = String(value || '').match(/[a-z0-9_.-]{3,}|[\u3400-\u9fff]{2,}/g) || []
+  const result = []
+  for (const word of words) {
+    if (/[\u3400-\u9fff]/.test(word) && word.length > 2) {
+      for (let index = 0; index < word.length - 1; index++) result.push(word.slice(index, index + 2))
+    } else {
+      result.push(word)
+    }
+  }
+  return [...new Set(result)]
 }
 
 function detectContradictions (facts, previous = []) {
@@ -159,6 +193,8 @@ function prepareTurnInput (input, maxContextTokens = DEFAULT_CONTEXT_WINDOW) {
     current = {
       ...current,
       workingMemory: compactMemory(current.workingMemory),
+      skills: (current.skills || []).slice(0, 1),
+      knowledge: (current.knowledge || []).slice(0, 3),
       latestObservation: compactObservation(current.latestObservation, false)
     }
     metrics = measureTurn(current, maxContextTokens, maxInputTokens, outputReserveTokens, safetyTokens)
@@ -167,6 +203,8 @@ function prepareTurnInput (input, maxContextTokens = DEFAULT_CONTEXT_WINDOW) {
     current = {
       ...current,
       availableTools: (current.availableTools || []).slice(0, 4),
+      skills: [],
+      knowledge: [],
       workingMemory: minimalMemory(current.workingMemory),
       latestObservation: compactObservation(current.latestObservation, true)
     }
@@ -237,5 +275,7 @@ module.exports = {
   prepareTurnInput,
   measureTurn,
   compactObservation,
-  minimalMemory
+  minimalMemory,
+  resolveMissingInformation,
+  statementSatisfiesGap
 }

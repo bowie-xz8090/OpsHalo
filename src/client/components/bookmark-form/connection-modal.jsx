@@ -35,9 +35,7 @@ export default function ConnectionModal ({ store }) {
       'config'
     ]),
     bookmarkGroups: store.bookmarkGroups || [],
-    bookmarks: store.bookmarks || [],
-    serials: store.serials || [],
-    loaddingSerials: store.loaddingSerials
+    bookmarks: store.bookmarks || []
   }
 
   return (

@@ -43,7 +43,6 @@ export default function AgentStepCard ({ step, onEvidence, current = false }) {
     </article>
   )
 }
-
 function statusIcon (status) {
   return { pending: '·', running: '●', awaiting: '!', success: '✓', warning: '!', error: '×', cancelled: '−' }[status] || '·'
 }

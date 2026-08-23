@@ -12,7 +12,6 @@ import {
   ApartmentOutlined,
   MoreOutlined,
   ColumnWidthOutlined,
-  LogoutOutlined,
   ReloadOutlined
 } from '@ant-design/icons'
 import { Tooltip, Popover, Select } from 'antd'
@@ -20,8 +19,7 @@ import classnames from 'classnames'
 import {
   paneMap,
   connectionMap,
-  statusMap,
-  terminalSerialType
+  statusMap
 } from '../../common/constants'
 import { SplitViewIcon } from '../icons/split-view'
 import { HeartbeatIcon } from '../icons/heartbeat'
@@ -38,7 +36,6 @@ export default function SessionControl (props) {
     showSidebarControl,
     isDisabled,
     isSshDisabled,
-    isNotTerminalType,
     canSplitView,
     sftpPathFollowSsh,
     keepaliveEnabled,
@@ -46,7 +43,6 @@ export default function SessionControl (props) {
     wrapDisabled,
     delKeyPressed,
     hideDelKeyTip,
-    agentModeEnabled,
     aiInputMode,
     aiModeSwitching,
     onChangePane,
@@ -62,13 +58,8 @@ export default function SessionControl (props) {
     onSwitchEncoding,
     onShowSidebar,
     onDismissDelKeyTip,
-    onExitGracefully,
     onReload
   } = props
-
-  if (isNotTerminalType) {
-    return null
-  }
 
   const isSsh = !!tab.authType
   const isLocal = !isSsh && (tab.type === connectionMap.local || !tab.type)
@@ -133,7 +124,6 @@ export default function SessionControl (props) {
   }
 
   function renderAiInputModeControl () {
-    if (!agentModeEnabled) return null
     const options = [
       { value: 'shell', label: 'Shell模式' },
       { value: 'agent', label: 'Agent模式' }
@@ -216,7 +206,7 @@ export default function SessionControl (props) {
     if (isMobile) {
       return null
     }
-    if (!canSplitView || isNotTerminalType || !showSshFeatures) {
+    if (!canSplitView || !showSshFeatures) {
       return null
     }
     const title = e('sshSftpSplitView')
@@ -286,21 +276,6 @@ export default function SessionControl (props) {
     return (
       <Tooltip title={title}>
         <ColumnWidthOutlined {...iconProps} />
-      </Tooltip>
-    )
-  }
-
-  function renderExitGracefullyIcon () {
-    if (tab.type !== terminalSerialType) {
-      return null
-    }
-    const title = e('exitGracefully')
-    return (
-      <Tooltip title={title}>
-        <LogoutOutlined
-          className='sess-icon pointer exit-gracefully-icon'
-          onClick={onExitGracefully}
-        />
       </Tooltip>
     )
   }
@@ -425,7 +400,6 @@ export default function SessionControl (props) {
         {renderWrapIcon()}
         {renderReloadIcon()}
         {renderTransferIcon()}
-        {renderExitGracefullyIcon()}
         {renderInfoIcon()}
         {renderAiInputModeControl()}
         {renderTermControls()}
@@ -458,7 +432,6 @@ export default function SessionControl (props) {
       {renderWrapIcon()}
       {renderReloadIcon()}
       {renderTransferIcon()}
-      {renderExitGracefullyIcon()}
       {renderInfoIcon()}
       {renderAiInputModeControl()}
       {renderTermControls()}

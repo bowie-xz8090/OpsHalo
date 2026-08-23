@@ -236,7 +236,7 @@ export default Store => {
     'connectionHoppings', 'sshTunnels'
   ]
   const bookmarkFeatureFields = [
-    'connectionHoppings', 'sshTunnels', 'quickCommands', 'runScripts'
+    'connectionHoppings', 'sshTunnels', 'runScripts'
   ]
 
   function sanitizeBookmark (b) {
@@ -252,7 +252,9 @@ export default Store => {
   }
 
   Store.prototype.mcpListBookmarks = function () {
-    return deepCopy(window.store.bookmarks).map(sanitizeBookmark)
+    return deepCopy(window.store.bookmarks)
+      .filter(bookmark => !bookmark.type || bookmark.type === 'ssh')
+      .map(sanitizeBookmark)
   }
 
   Store.prototype.mcpGetBookmark = function (args) {
@@ -260,6 +262,9 @@ export default Store => {
     const bookmark = store.bookmarks.find(b => b.id === args.id)
     if (!bookmark) {
       throw new Error(`Bookmark not found: ${args.id}`)
+    }
+    if (bookmark.type && bookmark.type !== 'ssh') {
+      throw new Error(`Unsupported bookmark type: ${bookmark.type}`)
     }
     return deepCopy(sanitizeBookmark(bookmark))
   }
@@ -293,6 +298,10 @@ export default Store => {
     if (!bookmark) {
       throw new Error(`Bookmark not found: ${id}`)
     }
+    const nextType = updates.type || bookmark.type || 'ssh'
+    if (nextType !== 'ssh') {
+      throw new Error(`Unsupported bookmark type: ${nextType}`)
+    }
 
     store.editItem(id, updates, settingMap.bookmarks)
 
@@ -317,6 +326,9 @@ export default Store => {
     const bookmark = store.bookmarks.find(b => b.id === args.id)
     if (!bookmark) {
       throw new Error(`Bookmark not found: ${args.id}`)
+    }
+    if (bookmark.type && bookmark.type !== 'ssh') {
+      throw new Error(`Unsupported bookmark type: ${bookmark.type}`)
     }
 
     store.onSelectBookmark(args.id)
@@ -351,61 +363,6 @@ export default Store => {
       message: `Bookmark group "${group.title}" created`
     }
   }
-
-  // ==================== Quick Command APIs ====================
-
-  // Store.prototype.mcpListQuickCommands = function () {
-  //   return deepCopy(window.store.quickCommands)
-  // }
-
-  // Store.prototype.mcpAddQuickCommand = function (args) {
-  //   const { store } = window
-  //   const qm = {
-  //     id: uid(),
-  //     name: args.name,
-  //     commands: args.commands,
-  //     inputOnly: args.inputOnly || false,
-  //     labels: args.labels || []
-  //   }
-
-  //   store.addQuickCommand(qm)
-
-  //   return {
-  //     success: true,
-  //     id: qm.id,
-  //     message: `Quick command "${qm.name}" created`
-  //   }
-  // }
-
-  // Store.prototype.mcpRunQuickCommand = function (args) {
-  //   const { store } = window
-  //   const qm = store.quickCommands.find(q => q.id === args.id)
-  //   if (!qm) {
-  //     throw new Error(`Quick command not found: ${args.id}`)
-  //   }
-
-  //   store.runQuickCommandItem(args.id)
-
-  //   return {
-  //     success: true,
-  //     message: `Executed quick command "${qm.name}"`
-  //   }
-  // }
-
-  // Store.prototype.mcpDeleteQuickCommand = function (args) {
-  //   const { store } = window
-  //   const qm = store.quickCommands.find(q => q.id === args.id)
-  //   if (!qm) {
-  //     throw new Error(`Quick command not found: ${args.id}`)
-  //   }
-
-  //   store.delQuickCommand({ id: args.id })
-
-  //   return {
-  //     success: true,
-  //     message: `Deleted quick command "${qm.name}"`
-  //   }
-  // }
 
   // ==================== Tab APIs ====================
 
@@ -1138,7 +1095,7 @@ export default Store => {
     if (!tab) {
       throw new Error(`Tab not found: ${resolvedTabId}`)
     }
-    if (tab.type !== 'ssh' && tab.type !== 'ftp') {
+    if (tab.type !== 'ssh') {
       throw new Error(`Tab "${resolvedTabId}" is not an SSH/SFTP tab (type: ${tab.type || 'local'})`)
     }
     const sftpEntry = refs.get('sftp-' + resolvedTabId)

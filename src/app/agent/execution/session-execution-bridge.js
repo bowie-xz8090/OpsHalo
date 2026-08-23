@@ -23,7 +23,7 @@ class SessionExecutionBridge {
     return child
   }
 
-  request (action, payload, signal) {
+  request (action, payload, signal, onProgress) {
     const child = this.bindChild()
     const id = `agentmsg_${crypto.randomBytes(18).toString('base64url')}`
     return new Promise((resolve, reject) => {
@@ -33,7 +33,7 @@ class SessionExecutionBridge {
       }
       if (signal?.aborted) return abort()
       if (signal) signal.addEventListener('abort', abort, { once: true })
-      this.pending.set(id, { resolve, reject, signal, abort })
+      this.pending.set(id, { resolve, reject, signal, abort, onProgress })
       try {
         child.send({ type: 'agent', id, action, ...payload })
       } catch (error) {
@@ -46,6 +46,11 @@ class SessionExecutionBridge {
   }
 
   onMessage (message) {
+    if (message?.type === 'agent-progress') {
+      const pending = this.pending.get(message.id)
+      if (pending?.onProgress) pending.onProgress(message.progress)
+      return
+    }
     if (message?.type !== 'agent-response') return
     const pending = this.pending.get(message.id)
     if (!pending) return
@@ -59,7 +64,7 @@ class SessionExecutionBridge {
     return this.request('describe-session', { pid: tabId }, signal)
   }
 
-  exec ({ session, command, timeoutMs, intent, capability, expected, signal }) {
+  exec ({ session, command, timeoutMs, intent, capability, expected, signal, progress }) {
     const abort = () => this.cancel(session.sessionBinding.sessionPid, intent.invocationId)
     signal?.addEventListener('abort', abort, { once: true })
     return this.request('exec', {
@@ -68,7 +73,7 @@ class SessionExecutionBridge {
       timeoutMs,
       capability,
       expected
-    }, signal).then(result => ({
+    }, signal, progress).then(result => ({
       ...result,
       status: result.timedOut ? 'timeout' : result.exitCode === 0 ? 'success' : 'error'
     })).finally(() => signal?.removeEventListener('abort', abort))

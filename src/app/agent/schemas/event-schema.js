@@ -1,9 +1,11 @@
 const { z } = require('zod')
 const { AgentEventTypeSchema } = require('./enums')
-const { VersionSchema, IdSchema, IsoDateSchema } = require('./shared')
+const { IdSchema, IsoDateSchema } = require('./shared')
+
+const AgentEventVersionSchema = z.union([z.literal(1), z.literal(2)])
 
 const AgentEventSchema = z.strictObject({
-  schemaVersion: VersionSchema,
+  schemaVersion: AgentEventVersionSchema,
   eventId: IdSchema,
   taskId: IdSchema,
   sequence: z.number().int().positive(),
@@ -30,4 +32,4 @@ function validateEventSequence (events, startSequence = 0) {
   return { valid: true, lastSequence: expected - 1 }
 }
 
-module.exports = { AgentEventSchema, validateEventSequence }
+module.exports = { AgentEventSchema, AgentEventVersionSchema, validateEventSequence }

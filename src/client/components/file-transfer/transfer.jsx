@@ -38,7 +38,6 @@ export default class TransportAction extends Component {
     this.total = 0
     this.transferred = 0
     this.currentProgress = 1
-    this.isFtp = sftp?.type === 'ftp'
     this.terminalId = sftp?.terminalId
   }
 
@@ -537,15 +536,7 @@ export default class TransportAction extends Component {
     if (zip) {
       return this.zipTransferFolder()
     }
-    if (!this.isFtp) {
-      return this.transferFile()
-    } else {
-      await this.transferFolderRecursive()
-    }
-    this.onEnd({
-      transferred: this.transferred,
-      size: this.total
-    })
+    return this.transferFile()
   }
 
   list = async (type, path, tabId) => {

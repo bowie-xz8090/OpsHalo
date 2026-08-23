@@ -17,11 +17,6 @@ import {
   Button,
   Input
 } from 'antd'
-import {
-  terminalWebType,
-  terminalRdpType,
-  terminalVncType
-} from '../../common/constants'
 import TabSelect from './tab-select'
 import classNames from 'classnames'
 import deepCopy from 'json-deep-copy'
@@ -100,11 +95,7 @@ export default class BatchInput extends Component {
 
   getTabs = () => {
     const { activeTabId } = this.props
-    return deepCopy(this.props.tabs.filter(tab => {
-      return tab.type !== terminalWebType &&
-        tab.type !== terminalRdpType &&
-        tab.type !== terminalVncType
-    })).sort((a, b) => {
+    return deepCopy(this.props.tabs).sort((a, b) => {
       // current tab goes first
       if (a.id === activeTabId) return -1
       if (b.id === activeTabId) return 1

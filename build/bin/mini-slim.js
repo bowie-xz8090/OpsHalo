@@ -1,27 +1,8 @@
-/**
- * Mini edition pack slim helpers.
- * Drop unused native modules / build junk that UI feature-gate cannot remove.
- */
+/** Packaging helpers for native runtime modules. */
 
 const { rm, echo } = require('shelljs')
 const { resolve } = require('path')
 const fs = require('fs')
-
-/** Backend deps Mini edition does not need at runtime */
-const MINI_EXCLUDE_DEPS = [
-  // ~17MB native; SSH/SFTP Mini 不需要串口
-  'serialport'
-]
-
-function applyMiniDepExcludes (pack) {
-  for (const name of MINI_EXCLUDE_DEPS) {
-    if (pack.dependencies && pack.dependencies[name]) {
-      echo(`[mini-slim] drop dependency ${name}`)
-      delete pack.dependencies[name]
-    }
-  }
-  return pack
-}
 
 /** Remove node-pty compile intermediates; keep only runtime binaries */
 function slimNodePty (root = 'work/app/node_modules/node-pty') {
@@ -66,35 +47,13 @@ function slimNodePty (root = 'work/app/node_modules/node-pty') {
   }
 }
 
-/** Remove Mini-unused frontend chunks / wasm after vite build */
-function slimFrontendAssets (assetsDir = 'work/app/assets') {
-  if (!fs.existsSync(assetsDir)) {
-    return
-  }
-  echo('[mini-slim] removing unused frontend assets')
-  const kill = [
-    `${assetsDir}/assets/rdp_client_bg*.wasm`,
-    `${assetsDir}/assets/rdp_client*.js`,
-    `${assetsDir}/chunk/rfb-*`,
-    `${assetsDir}/chunk/*vnc*`,
-    `${assetsDir}/chunk/*rdp*`,
-    `${assetsDir}/chunk/*spice*`,
-    `${assetsDir}/chunk/*novnc*`
-  ]
-  for (const p of kill) {
-    rm('-rf', p)
-  }
-}
-
 /** Extra cleanup after yarn autoclean */
 function slimInstalledModules (nm = 'work/app/node_modules') {
   if (!fs.existsSync(nm)) {
     return
   }
-  echo('[mini-slim] removing excluded / heavy leftovers')
+  echo('[mini-slim] removing packaging-only leftovers')
   const extra = [
-    `${nm}/serialport`,
-    `${nm}/@serialport`,
     `${nm}/cpu-features`,
     `${nm}/@types`
   ]
@@ -105,9 +64,6 @@ function slimInstalledModules (nm = 'work/app/node_modules') {
 }
 
 module.exports = {
-  MINI_EXCLUDE_DEPS,
-  applyMiniDepExcludes,
   slimNodePty,
-  slimFrontendAssets,
   slimInstalledModules
 }

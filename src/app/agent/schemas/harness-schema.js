@@ -3,8 +3,9 @@ const { GoalStatusSchema } = require('./enums')
 const {
   VersionSchema, IdSchema, CompletionCriterionSchema
 } = require('./shared')
-const { ToolIntentSchema } = require('./tool-schema')
+const { ToolIntentSchema, ReadProbeBundleSchema } = require('./tool-schema')
 const { ObservationSchema } = require('./observation-schema')
+const { AgentModelProfilesSchema, CapabilityReportSnapshotSchema } = require('./model-profile-schema')
 
 const PlannerDecisionSchema = z.strictObject({
   schemaVersion: VersionSchema,
@@ -15,14 +16,16 @@ const PlannerDecisionSchema = z.strictObject({
   missingInformation: z.array(z.string().max(1000)).max(10),
   expectedObservation: z.string().max(1000).optional(),
   action: ToolIntentSchema.optional(),
+  readProbeBundle: ReadProbeBundleSchema.optional(),
   completionCriteria: z.array(CompletionCriterionSchema).max(50),
   userQuestion: z.string().max(1000).optional()
 }).superRefine((value, ctx) => {
-  if (value.goalStatus === 'continue' && !value.action) {
-    ctx.addIssue({ code: 'custom', path: ['action'], message: 'continue requires exactly one action' })
+  const actionCount = Number(!!value.action) + Number(!!value.readProbeBundle)
+  if (value.goalStatus === 'continue' && actionCount !== 1) {
+    ctx.addIssue({ code: 'custom', path: ['action'], message: 'continue requires exactly one action or read probe bundle' })
   }
-  if (value.goalStatus !== 'continue' && value.action) {
-    ctx.addIssue({ code: 'custom', path: ['action'], message: 'only continue may include an action' })
+  if (value.goalStatus !== 'continue' && actionCount) {
+    ctx.addIssue({ code: 'custom', path: ['action'], message: 'only continue may include an action or read probe bundle' })
   }
   if (value.goalStatus === 'need_user' && !value.userQuestion) {
     ctx.addIssue({ code: 'custom', path: ['userQuestion'], message: 'need_user requires a question' })
@@ -36,7 +39,9 @@ const HarnessSelectionSchema = z.strictObject({
   profileId: IdSchema.optional(),
   supportsNativeTools: z.boolean(),
   supportsStructuredOutput: z.boolean(),
-  maxContextTokens: z.number().int().positive().max(10000000)
+  maxContextTokens: z.number().int().positive().max(10000000),
+  modelProfiles: AgentModelProfilesSchema.optional(),
+  capabilityReport: CapabilityReportSnapshotSchema.optional()
 })
 
 const AgentTurnInputSchema = z.strictObject({

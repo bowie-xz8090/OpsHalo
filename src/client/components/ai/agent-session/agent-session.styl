@@ -14,6 +14,47 @@
   position relative
   box-sizing border-box
 
+.agent-session-decoration
+  pointer-events auto
+  box-sizing border-box
+  padding 2px 8px
+  overflow hidden
+
+.agent-session-overlay-inner.is-embedded
+  height 100%
+  max-height none
+  border-radius 4px
+  box-shadow none
+  background rgba(39, 39, 39, .99)
+
+.agent-session-overlay-inner.is-embedded.is-thinking-only
+  min-height 0
+  .agent-session-header.is-minimal
+    height 100%
+    min-height 0
+    padding 0 12px
+
+.agent-session-overlay-inner.is-embedded
+  .agent-approval-card, .agent-user-input-card, .agent-final-card
+    max-height none
+  .agent-final-card, .agent-approval-card, .agent-user-input-card, .agent-timeline
+    overflow visible
+  .agent-approval-card.is-resolved
+    border-color #3ba272
+    background rgba(18, 48, 36, .78)
+
+.agent-session-overlay-inner.is-embedded.is-content-sized
+  height auto
+  min-height 0
+  overflow visible
+  .agent-timeline
+    flex none
+  .agent-approval-card, .agent-user-input-card, .agent-final-card
+    flex none
+  .agent-approval-command
+    max-height none
+    overflow visible
+
 .agent-session-overlay-inner.is-thinking-only
   min-height 48px
 
@@ -37,7 +78,7 @@
   border-bottom 0
   color rgba(255, 255, 255, .72)
 
-.agent-session-status, .agent-session-controls, .agent-approval-actions, .agent-user-input-actions, .agent-final-actions
+.agent-session-status, .agent-session-controls, .agent-approval-actions, .agent-user-input-actions
   display flex
   align-items center
   gap 8px
@@ -295,6 +336,12 @@
     margin 5px 0
   h3, h4
     margin 5px 0
+  h3
+    display flex
+    align-items center
+    gap 8px
+    .ant-tag
+      margin 0
 
 .agent-final-card.is-complete
   border-color #3ba272
@@ -314,6 +361,13 @@
     max-width none !important
     height 70% !important
     max-height 70% !important
+  .agent-session-decoration .agent-session-overlay-inner
+    position static !important
+    width 100% !important
+    height 100% !important
+    max-height none !important
+  .agent-session-decoration .agent-session-overlay-inner.is-content-sized
+    height auto !important
   .agent-approval-head
     align-items flex-start
     flex-direction column

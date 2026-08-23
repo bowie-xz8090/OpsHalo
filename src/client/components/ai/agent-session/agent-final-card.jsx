@@ -1,36 +1,48 @@
-import { Button, Tag } from 'antd'
+import { Tag } from 'antd'
+import {
+  readableConfidence,
+  readableFactStatement,
+  readableFinalConclusion,
+  readableFinalStatus,
+  readableOperationStatus
+} from '../../../common/agent-final-copy.mjs'
 
-const labels = {
-  complete: ['✓', '排查完成', 'green'],
-  inconclusive: ['?', '证据不足', 'gold'],
-  blocked: ['🔒', '已阻断', 'red'],
-  partial: ['⚠', '部分完成', 'orange'],
-  failed: ['✕', '任务失败', 'red'],
-  cancelled: ['■', '已取消', 'default']
+const statusColors = {
+  inconclusive: 'gold',
+  blocked: 'red',
+  partial: 'orange',
+  failed: 'red',
+  cancelled: 'default'
 }
 
-export default function AgentFinalCard ({ result, onEvidence, onClear, onFollowUp, canClear = true }) {
+export default function AgentFinalCard ({ result, detailsOpen, onLayoutChange }) {
   if (!result) return null
-  const [icon, label, color] = labels[result.status] || ['●', result.status, 'default']
-  const hasDetails = !!(result.confirmedFacts?.length || result.inferences?.length || result.operations?.length || result.unresolvedItems?.length)
+  const statusLabel = readableFinalStatus(result.status)
+  const hasDetails = !!(result.confirmedFacts?.length || result.inferences?.length || result.operations?.length || result.unresolvedItems?.length || result.knowledgeCitations?.length)
+  const expanded = detailsOpen ?? result.status !== 'complete'
   return (
     <section className={`agent-final-card is-${result.status}`}>
-      <h3>{icon} {label} <Tag color={color}>{result.status}</Tag></h3>
-      <p className='agent-final-conclusion'>{result.conclusion}</p>
+      <h3>
+        分析结果
+        {statusLabel && <Tag color={statusColors[result.status]}>{statusLabel}</Tag>}
+      </h3>
+      <p className='agent-final-conclusion'>{readableFinalConclusion(result)}</p>
       {hasDetails && (
-        <details className='agent-final-details' open={result.status !== 'complete'}>
-          <summary>查看依据与未解决项</summary>
-          {!!result.confirmedFacts?.length && <><h4>已确认事实</h4>{result.confirmedFacts.map(fact => <p key={fact.factId}>• {fact.statement}（{fact.confidence}）</p>)}</>}
-          {!!result.inferences?.length && <><h4>推断</h4>{result.inferences.map(fact => <p key={fact.factId}>• {fact.statement}</p>)}</>}
-          {!!result.operations?.length && <><h4>已执行操作与验证</h4>{result.operations.map(item => <p key={item.invocationId}>• {item.expectedEffect}：{item.actualStatus} / {item.verificationStatus}</p>)}</>}
-          {!!result.unresolvedItems?.length && <><h4>未解决</h4>{result.unresolvedItems.map((item, index) => <p key={index}>• {item}</p>)}</>}
+        <details
+          className='agent-final-details'
+          open={expanded}
+          onToggle={event => {
+            if (event.currentTarget.open !== expanded) onLayoutChange?.(event.currentTarget.open)
+          }}
+        >
+          <summary>查看分析依据和待确认内容</summary>
+          {!!result.confirmedFacts?.length && <><h4>命令输出已确认</h4>{result.confirmedFacts.map(fact => <p key={fact.factId}>• {readableFactStatement(fact.statement)}{readableConfidence(fact.confidence) ? `（${readableConfidence(fact.confidence)}）` : ''}</p>)}</>}
+          {!!result.inferences?.length && <><h4>AI 分析判断</h4>{result.inferences.map(fact => <p key={fact.factId}>• {readableFactStatement(fact.statement)}</p>)}</>}
+          {!!result.operations?.length && <><h4>操作结果</h4>{result.operations.map(item => <p key={item.invocationId}>• {item.expectedEffect}：{[readableOperationStatus(item.actualStatus), readableOperationStatus(item.verificationStatus)].filter(Boolean).join('，')}</p>)}</>}
+          {!!result.unresolvedItems?.length && <><h4>仍需确认</h4>{result.unresolvedItems.map((item, index) => <p key={index}>• {item}</p>)}</>}
+          {!!result.knowledgeCitations?.length && <><h4>参考文档</h4>{result.knowledgeCitations.map(item => <p key={`${item.sourceId}:${item.chunkId}:${item.sourceVersion}`} className={item.stale ? 'is-stale' : ''}>• {item.sourcePath}{item.startLine ? `:${item.startLine}${item.endLine && item.endLine !== item.startLine ? `-${item.endLine}` : ''}` : ''}{item.stale ? '（来源已变化或删除）' : ''}</p>)}</>}
         </details>
       )}
-      <div className='agent-final-actions'>
-        {(result.evidenceRefs || []).map(ref => <Button key={ref} size='small' onClick={() => onEvidence(ref)}>查看证据</Button>)}
-        {canClear && <Button size='small' onClick={onClear}>清理证据</Button>}
-        <Button size='small' type='primary' onClick={onFollowUp}>继续追问</Button>
-      </div>
     </section>
   )
 }

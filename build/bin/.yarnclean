@@ -64,7 +64,6 @@ scripts
 samplejson
 flash
 third_party
-tools
 bench
 benchmarks
 spec

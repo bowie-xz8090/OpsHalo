@@ -17,10 +17,7 @@ const { assertLegacyMcpGatewayBoundary } = require('../agent/policy/legacy-mcp-g
 const { rules: builtinDenyRules, matchBuiltinDeny } = require('../agent/policy/builtin-deny-rules')
 const { matchUserCommandRules } = require('../agent/policy/policy-engine')
 const {
-  sshBookmarkSchema,
-  telnetBookmarkSchema,
-  serialBookmarkSchema,
-  localBookmarkSchema
+  sshBookmarkSchema
 } = require('../common/bookmark-zod-schemas')
 
 // Dangerous tab props that allow arbitrary command execution.
@@ -630,45 +627,15 @@ class ElectermMCPServer {
     )
 
     server.registerTool(
-      'open_electerm_tab_telnet',
-      {
-        description: 'Open a new Telnet terminal tab directly with connection parameters (no bookmark created)',
-        inputSchema: telnetBookmarkSchema
-      },
-      async (args) => {
-        const result = await self.sendToRenderer('tool-call', {
-          toolName: 'open_tab',
-          args: { ...stripDangerousTabProps(args), type: 'telnet' }
-        })
-        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }
-      }
-    )
-
-    server.registerTool(
-      'open_electerm_tab_serial',
-      {
-        description: 'Open a new Serial terminal tab directly with connection parameters (no bookmark created)',
-        inputSchema: serialBookmarkSchema
-      },
-      async (args) => {
-        const result = await self.sendToRenderer('tool-call', {
-          toolName: 'open_tab',
-          args: { ...stripDangerousTabProps(args), type: 'serial' }
-        })
-        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }
-      }
-    )
-
-    server.registerTool(
       'open_electerm_tab_local',
       {
         description: 'Open a new Local terminal tab directly with connection parameters (no bookmark created)',
-        inputSchema: localBookmarkSchema
+        inputSchema: {}
       },
-      async (args) => {
+      async () => {
         const result = await self.sendToRenderer('tool-call', {
-          toolName: 'open_tab',
-          args: { ...stripDangerousTabProps(args), type: 'local' }
+          toolName: 'open_local_terminal',
+          args: {}
         })
         return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }
       }
@@ -717,51 +684,6 @@ class ElectermMCPServer {
           const result = await self.sendToRenderer('tool-call', {
             toolName: 'add_bookmark',
             args: { ...args, type: 'ssh' }
-          })
-          return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }
-        }
-      )
-
-      server.registerTool(
-        'add_electerm_bookmark_telnet',
-        {
-          description: 'Add a new Telnet bookmark to electerm',
-          inputSchema: telnetBookmarkSchema
-        },
-        async (args) => {
-          const result = await self.sendToRenderer('tool-call', {
-            toolName: 'add_bookmark',
-            args: { ...args, type: 'telnet' }
-          })
-          return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }
-        }
-      )
-
-      server.registerTool(
-        'add_electerm_bookmark_serial',
-        {
-          description: 'Add a new Serial bookmark to electerm',
-          inputSchema: serialBookmarkSchema
-        },
-        async (args) => {
-          const result = await self.sendToRenderer('tool-call', {
-            toolName: 'add_bookmark',
-            args: { ...args, type: 'serial' }
-          })
-          return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }
-        }
-      )
-
-      server.registerTool(
-        'add_electerm_bookmark_local',
-        {
-          description: 'Add a new Local terminal bookmark to electerm',
-          inputSchema: localBookmarkSchema
-        },
-        async (args) => {
-          const result = await self.sendToRenderer('tool-call', {
-            toolName: 'add_bookmark',
-            args: { ...args, type: 'local' }
           })
           return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }
         }

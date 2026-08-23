@@ -66,6 +66,28 @@ describe('execCommand – session layer', () => {
     assert.equal(r.timedOut, false)
   })
 
+  test('settles after exit when an SSH server omits channel close', async () => {
+    const client = makeClient((stream) => {
+      stream.emit('data', Buffer.from('done\n'))
+      stream.emit('exit', 0)
+    })
+    const r = await makeSession(client).execCommand('status')
+    assert.equal(r.exitCode, 0)
+    assert.equal(r.stdout, 'done\n')
+    assert.equal(r.timedOut, false)
+  })
+
+  test('settles after end when an SSH server omits exit and close', async () => {
+    const client = makeClient((stream) => {
+      stream.emit('data', Buffer.from('done\n'))
+      stream.emit('end')
+    })
+    const r = await makeSession(client).execCommand('status')
+    assert.equal(r.exitCode, null)
+    assert.equal(r.stdout, 'done\n')
+    assert.equal(r.timedOut, false)
+  })
+
   test('resolves exitCode null when server sends no exit status', async () => {
     const client = makeClient((stream) => {
       stream.emit('data', Buffer.from('x'))

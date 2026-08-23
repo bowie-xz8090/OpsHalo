@@ -14,7 +14,7 @@ const resultSchema = {
 }
 
 function definition (options) {
-  return {
+  const value = {
     schemaVersion: 1,
     version: '1',
     category: 'read',
@@ -27,12 +27,18 @@ function definition (options) {
     maxTimeoutMs: 20000,
     maxRawCaptureBytes: 2 * 1024 * 1024,
     maxModelOutputBytes: 6144,
+    parallelSafe: false,
     supportsCancel: true,
     supportsDryRun: false,
     parserId: 'generic',
+    resultEncoding: 'json',
     resultSchema,
     ...options
   }
+  value.parallelSafe = options.parallelSafe !== undefined
+    ? options.parallelSafe === true
+    : value.mutability === 'none' && value.approval === 'auto_if_bounded' && ['context', 'probe', 'read'].includes(value.category) && !/^(?:shell|sftp|background|terminal|mcp)\./.test(value.name)
+  return value
 }
 
 function shellQuote (value) {

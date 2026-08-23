@@ -13,6 +13,7 @@ const { adaptationHintsFor } = require('../../src/app/agent/observation/observat
 const { buildPrompt } = require('../../src/app/agent/harness/prompt-builder')
 const { AuditLog } = require('../../src/app/agent/audit/audit-log')
 const { safeAIRequestError } = require('../../src/app/lib/ai-error')
+const { OptionalSummarizer } = require('../../src/app/agent/observation/optional-summarizer')
 
 test('Secret redactor removes authorization, key-value and private key material', () => {
   const input = 'Authorization: Bearer abcdefghijklmnopqrstuvwxyz password=hello\n-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----'
@@ -96,6 +97,42 @@ test('Observation stores only redacted gzip evidence and supports paging/deletio
   assert.match(page.content, /<redacted:/)
   assert.equal(evidenceStore.delete(session.taskId, observation.evidenceRefs[0]).deleted.length, 1)
   assert.throws(() => evidenceStore.read(session.taskId, observation.evidenceRefs[0], 0, 100), /不可用|已删除/)
+})
+
+test('large observations use only citation-valid optional summaries and propagate cancellation context', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'electerm-agent-summary-'))
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }))
+  const evidenceStore = new EvidenceStore(root)
+  const controller = new AbortController()
+  let request
+  let receivedSignal
+  const pipeline = new ObservationPipeline({
+    evidenceStore,
+    summarizer: new OptionalSummarizer(async (value, signal) => {
+      request = value
+      receivedSignal = signal
+      return {
+        summary: '服务输出已压缩并确认。',
+        factIds: [value.data.facts[0].id],
+        evidenceRanges: []
+      }
+    })
+  })
+  const session = {
+    taskId: 'task_large_summary_12345',
+    harness: { adapter: 'openai_compatible', modelProfiles: { summarizer: { modelId: 'summary-model' } } },
+    currentInvocation: { toolName: 'shell.review_exec' },
+    memory: { verificationObligations: [] }
+  }
+  const observation = await pipeline.process(session, {
+    invocationId: 'invocation_large_summary_12345',
+    status: 'success',
+    exitCode: 0
+  }, { stdout: `ActiveState=active\n${'detail=value\n'.repeat(4000)}`, stderr: '' }, controller.signal)
+  assert.equal(observation.summary, '服务输出已压缩并确认。')
+  assert.deepEqual(request.tools, [])
+  assert.equal(request.modelProfile.modelId, 'summary-model')
+  assert.equal(receivedSignal, controller.signal)
 })
 
 test('Evidence quota and TTL fail closed and remove expired gzip content', t => {

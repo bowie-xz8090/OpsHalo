@@ -9,7 +9,6 @@ import {
   sftpDefaultSortSettingKey,
   checkedKeysLsKey,
   expandedKeysLsKey,
-  resolutionsLsKey,
   localAddrBookmarkLsKey,
   syncServerDataKey
 } from '../common/constants'
@@ -67,11 +66,6 @@ export default store => {
     })
     window[`watch${name}`].start()
   }
-
-  autoRun(async () => {
-    ls.setItemJSON(resolutionsLsKey, store.resolutions)
-    return store.resolutions
-  }).start()
 
   autoRun(() => {
     if (!store.showModal) {

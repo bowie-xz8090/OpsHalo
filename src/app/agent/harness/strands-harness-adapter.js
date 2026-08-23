@@ -15,7 +15,7 @@ class StrandsHarnessAdapter extends AgentHarness {
   }
 
   getCapabilities () {
-    return { nativeTools: false, structuredOutput: true, streaming: true, usage: true, cancellation: true, maxContextTokens: this.config.maxContextTokens || 32000 }
+    return { nativeTools: false, structuredOutput: true, streaming: true, usage: true, cancellation: true, maxContextTokens: this.config.agentMaxContextTokens || 32000 }
   }
 
   async createAgent () {
@@ -33,9 +33,9 @@ class StrandsHarnessAdapter extends AgentHarness {
     }
     const model = new OpenAIModel({
       api: 'chat',
-      modelId: this.config.modelAI,
+      modelId: this.config.agentPlannerModel || this.config.modelAI,
       apiKey: this.config.apiKeyAI || 'not-configured',
-      maxTokens: this.config.maxOutputTokens || 2048,
+      maxTokens: this.config.agentMaxOutputTokens || 2048,
       clientConfig: {
         baseURL: this.config.baseURLAI,
         defaultHeaders: headers
@@ -54,7 +54,7 @@ class StrandsHarnessAdapter extends AgentHarness {
 
   async * runTurn (input, signal) {
     if (this.disposed) throw new Error('Strands harness has been disposed')
-    const agent = await this.createAgent()
+    const agent = this.agent || await this.createAgent()
     this.agent = agent
     const abort = () => agent.cancel?.()
     if (signal?.aborted) abort()
@@ -63,7 +63,7 @@ class StrandsHarnessAdapter extends AgentHarness {
       let result
       let decision
       try {
-        yield { type: 'status', phase: 'thinking', message: 'AI 正在规划下一步…' }
+        yield { type: 'phase', phase: 'thinking', safeMessage: 'AI 正在规划下一步…' }
         result = await retryTransient(() => invokeAgentWithTimeout(agent, buildPrompt(input), signal, this.config.agentModelTimeoutMs || 45000), signal, [0])
         decision = parseStrandsResult(result, input)
       } catch (firstError) {
@@ -73,13 +73,13 @@ class StrandsHarnessAdapter extends AgentHarness {
         try {
           result = await retryTransient(() => invokeAgentWithTimeout(agent, structureRepairPrompt(), signal, this.config.agentModelTimeoutMs || 45000), signal, [0])
           decision = parseStrandsResult(result, input)
-          yield { type: 'provider_warning', code: 'structure_repaired', message: '模型输出结构已在同一 Provider 内自动修复。' }
+          yield { type: 'phase', phase: 'degraded', code: 'structure_repaired', safeMessage: '模型输出结构已在同一 Provider 内自动修复。' }
         } catch (repairError) {
           if (isSdkCompatibilityError(repairError)) throw repairError
           const repairClassified = classifyHarnessError(repairError)
           if (repairClassified.category !== 'invalid_model_output') throw repairClassified
-          yield { type: 'provider_warning', code: 'suggestion_mode_required', message: '模型连续两次未返回可验证结构，已停止自动动作。' }
-          yield { type: 'decision', decision: suggestionModeDecision(firstError, input) }
+          yield { type: 'phase', phase: 'degraded', code: 'suggestion_mode_required', safeMessage: '模型连续两次未返回可验证结构，已停止自动动作。' }
+          yield { type: 'decision.completed', decision: suggestionModeDecision(firstError, input, result?.toString?.() || '') }
           return
         }
       }
@@ -87,18 +87,17 @@ class StrandsHarnessAdapter extends AgentHarness {
       if (usage) {
         yield { type: 'usage', inputTokens: usage.inputTokens || usage.input_tokens || 0, outputTokens: usage.outputTokens || usage.output_tokens || 0 }
       }
-      yield { type: 'status', phase: 'responding', message: 'AI 已形成可验证的下一步。' }
-      yield { type: 'decision', decision }
+      yield { type: 'phase', phase: 'responding', safeMessage: 'AI 已形成可验证的下一步。' }
+      yield { type: 'decision.completed', decision }
     } catch (error) {
       if (this.compatibleFallback && isSdkCompatibilityError(error)) {
-        yield { type: 'provider_warning', code: 'strands_compatibility_fallback', message: 'Strands SDK 当前环境不兼容，已使用用户显式启用的同 Provider 兼容适配器。' }
+        yield { type: 'phase', phase: 'degraded', code: 'strands_compatibility_fallback', safeMessage: 'Strands SDK 当前环境不兼容，已使用用户显式启用的同 Provider 兼容适配器。' }
         for await (const event of this.compatibleFallback.runTurn(input, signal)) yield event
         return
       }
       throw classifyHarnessError(error)
     } finally {
       signal?.removeEventListener('abort', abort)
-      if (this.agent === agent) this.agent = null
     }
   }
 

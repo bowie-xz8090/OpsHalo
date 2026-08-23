@@ -15,7 +15,29 @@ export const aiConfigsArr = [
   'agentMutationEnabled',
   'agentExternalMcpEnabled',
   'agentHarnessAdapter',
-  'agentCompatibleFallbackEnabled'
+  'agentCompatibleFallbackEnabled',
+  'agentGroundedSynthesisEnabled',
+  'agentFastModel',
+  'agentPlannerModel',
+  'agentSummarizerModel',
+  'agentMaxContextTokens',
+  'agentMaxOutputTokens',
+  'agentModelTimeoutMs',
+  'agentSynthesisTimeoutMs',
+  'agentStreamingEnabled',
+  'agentReasoningEffort',
+  'agentStructuredMode',
+  'agentTemperature',
+  'agentPromptCacheEnabled',
+  'agentSkillsEnabled',
+  'agentSkillDirectories',
+  'agentKnowledgeEnabled',
+  'agentKnowledgeSources',
+  'agentKnowledgeEmbeddingMode',
+  'agentCapabilityLevel',
+  'agentCapabilityCheckedAt',
+  'agentCapabilityExpiresAt',
+  'agentCapabilityProfileHash'
 ]
 
 export const requiredAiConfigsArr = [
@@ -41,6 +63,14 @@ export function isAgentAiConfigMissing (config = {}) {
 }
 
 export const defaultAIPresets = [
+  {
+    id: 'dashscope',
+    nameAI: '阿里云百炼（DashScope）',
+    baseURLAI: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    apiPathAI: '/chat/completions',
+    modelAI: 'qwen-plus',
+    authHeaderNameAI: 'Authorization: Bearer'
+  },
   {
     id: 'atlascloud',
     nameAI: 'AtlasCloud',

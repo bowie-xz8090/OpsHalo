@@ -65,7 +65,7 @@ export default function DeepLinkControl () {
   }
 
   const renderTooltipContent = () => {
-    const protocols = ['ssh', 'telnet', 'rdp', 'vnc', 'serial', 'spice', 'electerm', 'ftp']
+    const protocols = ['ssh', 'electerm']
     const tip = `Register electerm to handle protocol URLs (${protocols.join('://, ')})`
 
     return (

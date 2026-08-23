@@ -30,7 +30,6 @@ class Sftp {
         if (transferKeys.includes(func)) {
           return Transfer({
             sftpId: id,
-            isFtp: this.type === 'ftp',
             ...args[0],
             terminalId,
             type: func,

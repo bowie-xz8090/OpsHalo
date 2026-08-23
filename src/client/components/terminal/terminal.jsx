@@ -1,4 +1,5 @@
 import { Component, createRef } from 'react'
+import { createRoot } from 'react-dom/client'
 import { isEqual, pick, debounce, throttle } from 'lodash-es'
 import clone from '../../common/to-simple-obj.js'
 import resolve from '../../common/resolve.js'
@@ -19,9 +20,20 @@ import {
   resolveSmartInputRoute
 } from './agent-input-mode.mjs'
 import {
+  calculateSmartShellOverlayPadding,
   createOptimisticAgentSession,
-  failOptimisticAgentSession
+  failOptimisticAgentSession,
+  isTerminalAgentStatus
 } from '../../store/agent-session-view.mjs'
+import {
+  formatAgentTerminalTranscript,
+  parseAgentEvidenceTranscript
+} from '../../common/agent-terminal-transcript.mjs'
+import {
+  readTerminalInput,
+  readTerminalLogicalLine,
+  readTerminalPrompt
+} from '../../common/terminal-input-line.mjs'
 import {
   statusMap,
   paneMap,
@@ -30,8 +42,7 @@ import {
   rendererTypes,
   isMac,
   isMacJs,
-  connectionMap,
-  terminalSerialType
+  connectionMap
 } from '../../common/constants.js'
 import deepCopy from 'json-deep-copy'
 import { readClipboardAsync, readClipboard, copy } from '../../common/clipboard.js'
@@ -39,7 +50,6 @@ import AttachAddon from './attach-addon-custom.js'
 import getProxy from '../../common/get-proxy.js'
 import { ZmodemClient } from './zmodem-client.js'
 import { TrzszClient } from './trzsz-client.js'
-import { XmodemClient } from './xmodem-client.js'
 import DropFileModal from './drop-file-modal.jsx'
 import keyControlPressed from '../../common/key-control-pressed.js'
 import NormalBuffer from './normal-buffer.jsx'
@@ -75,6 +85,7 @@ import RemoteFloatControl from '../common/remote-float-control'
 import ReconnectOverlay from './reconnect-overlay.jsx'
 import TerminalErrorHandle from './terminal-error-handle.jsx'
 import TerminalSmartShellOverlay from './terminal-smart-shell-overlay.jsx'
+import AgentSessionOverlay from '../ai/agent-session/agent-session-overlay.jsx'
 import uid from '../../common/uid'
 import { appendMandatoryGuardrails } from '../ai/ai-guardrails'
 import {
@@ -102,38 +113,6 @@ import {
 } from './terminal-color-query.mjs'
 
 const e = window.translate
-
-// Expands \n \t \r \\ and \xHH hex byte escapes, used to let users type
-// control bytes (e.g. \x01 = Ctrl+A) in the serial "closeSequence" field.
-function expandCloseSequence (text) {
-  let result = ''
-  for (let i = 0; i < text.length; i++) {
-    if (text[i] === '\\' && i + 1 < text.length) {
-      const next = text[i + 1]
-      if (next === 'n') {
-        result += '\n'
-        i++
-      } else if (next === 't') {
-        result += '\t'
-        i++
-      } else if (next === 'r') {
-        result += '\r'
-        i++
-      } else if (next === '\\') {
-        result += '\\'
-        i++
-      } else if (next === 'x' && /^[0-9a-fA-F]{2}$/.test(text.slice(i + 2, i + 4))) {
-        result += String.fromCharCode(parseInt(text.slice(i + 2, i + 4), 16))
-        i += 3
-      } else {
-        result += text[i]
-      }
-    } else {
-      result += text[i]
-    }
-  }
-  return result
-}
 
 class Term extends Component {
   constructor (props) {
@@ -169,6 +148,25 @@ class Term extends Component {
     this.shellType = null
     this.smartShellProposalId = ''
     this._smartShellPadLines = 0
+    this._smartShellReservedRows = 0
+    this._agentTerminalCommands = new Map()
+    this._agentRenderedEvidence = new Set()
+    this._agentEvidenceRendering = new Set()
+    this._agentRenderedTranscripts = new Set()
+    this._agentNativeTerminalTasks = new Set()
+    this._agentNativeTerminalRunningTasks = new Set()
+    this._agentNativeTerminalCompletionSignals = new Set()
+    this._agentPendingNativeSessions = new Map()
+    this._agentConsumedApprovalIds = new Set()
+    this._agentPendingPromptPrefix = ''
+    this._agentInputBuffer = null
+    this._agentInputCursor = 0
+    this._agentInputPrompt = ''
+    this._agentEmbeddedEntries = new Map()
+    this._agentEmbeddedLiveKey = ''
+    this._agentEmbeddedSequence = 0
+    this._agentEmbeddedUpdateQueue = Promise.resolve()
+    this._agentEmbeddedPositionRaf = null
   }
 
   domRef = createRef()
@@ -179,17 +177,21 @@ class Term extends Component {
       agentSession => {
         if (this.onClose) return
         if (!agentSession) {
-          this.setState({ agentSession: null, agentInterrupting: false }, () => {
-            this.clearSmartShellCursorSpace()
-            this.updateSmartShellOverlayAnchor()
-            this.term?.focus()
-          })
+          this.setState({ agentSession: null, agentInterrupting: false })
           return
         }
+        agentSession = this.normalizeAgentSessionSnapshot(agentSession)
+        if (!agentSession) return
+        if (agentSession._tabActive === false) return
         if (agentSession.status === 'paused' || ['complete', 'inconclusive', 'blocked', 'failed', 'cancelled', 'partial'].includes(agentSession.status)) {
           this._agentManualPauseRequested = false
         }
-        this.setState({ agentSession, agentInterrupting: false }, () => this.updateSmartShellOverlayAnchor())
+        this.setState({ agentSession, agentInterrupting: false }, () => {
+          this.renderAgentTerminalTranscript(agentSession)
+          this.renderAgentTerminalEvidence(agentSession)
+            .catch(() => {})
+            .finally(() => this.renderAgentEmbeddedSession(agentSession))
+        })
       }
     )
     this.initTerminal()
@@ -238,10 +240,9 @@ class Term extends Component {
       })
     }
     if (
-      (this.state.smartShellProposal || this.state.agentSession) &&
+      this.state.smartShellProposal &&
       (
         prevState.smartShellProposal !== this.state.smartShellProposal ||
-        prevState.agentSession !== this.state.agentSession ||
         !isEqual(pick(this.props, names), pick(prevProps, names))
       )
     ) {
@@ -249,7 +250,7 @@ class Term extends Component {
         this.updateSmartShellOverlayAnchor()
         setTimeout(() => this.updateSmartShellOverlayAnchor(), 60)
       })
-    } else if (!this.state.smartShellProposal && !this.state.agentSession && (prevState.smartShellProposal || prevState.agentSession)) {
+    } else if (!this.state.smartShellProposal && prevState.smartShellProposal) {
       if (this.state.smartShellOverlayAnchor) {
         this.setState({ smartShellOverlayAnchor: null })
       }
@@ -283,6 +284,11 @@ class Term extends Component {
   componentWillUnmount () {
     this.agentSessionUnsubscribe?.()
     this.agentSessionUnsubscribe = null
+    this.disposeAgentEmbeddedEntries()
+    window.cancelAnimationFrame(this._agentEmbeddedPositionRaf)
+    this._agentEmbeddedPositionRaf = null
+    this.agentEmbeddedScrollDisposable?.dispose?.()
+    this.agentEmbeddedRenderDisposable?.dispose?.()
     refs.remove(this.id)
     clearTimeout(this.longPressTimer)
     this.longPressTimer = null
@@ -313,7 +319,6 @@ class Term extends Component {
     this.fitAddon = null
     this.zmodemClient = null
     this.trzszClient = null
-    this.xmodemClient = null
     this.searchAddon = null
     this.fitAddon = null
     this.cmdAddon = null
@@ -694,8 +699,8 @@ class Term extends Component {
       }
       return
     }
-    // Ctrl+U asks readline/zsh/bash to clear everything before the cursor.
-    this.attachAddon._sendData('\x15')
+    // Move to the end first so a mid-line cursor does not leave the suffix behind.
+    this.attachAddon._sendData('\x05\x15')
   }
 
   /**
@@ -704,24 +709,6 @@ class Term extends Component {
   getSmartShellOverlayHeight = (fontSize = 14) => {
     // head + message + 3-line command(+pad) + notes 预留 + margins
     return Math.round(Math.max(12, fontSize) * 18.5)
-  }
-
-  getAgentSessionOverlayHeight = (fontSize = 14) => {
-    const session = this.state.agentSession
-    if (!session) return this.getSmartShellOverlayHeight(fontSize)
-    const hasTimeline = !!session.timeline?.length
-    const thinkingOnly = !session.plan && !hasTimeline && !session.pendingApproval && !session.pendingUserInput && !session.finalResult
-    if (thinkingOnly) return Math.round(Math.max(12, fontSize) * 4.2)
-    if (session.pendingApproval) return Math.round(Math.max(12, fontSize) * 19)
-    if (session.pendingUserInput) return Math.round(Math.max(12, fontSize) * 14)
-    if (session.finalResult) return Math.round(Math.max(12, fontSize) * 24)
-    return Math.round(Math.max(12, fontSize) * 13)
-  }
-
-  getActiveAiOverlayHeight = (fontSize = 14) => {
-    return this.state.agentSession
-      ? this.getAgentSessionOverlayHeight(fontSize)
-      : this.getSmartShellOverlayHeight(fontSize)
   }
 
   /**
@@ -739,11 +726,10 @@ class Term extends Component {
       return
     }
     const fontSize = this.term.options?.fontSize || 14
-    const overlayHeight = this.getActiveAiOverlayHeight(fontSize)
-    const gap = 12
     const pos = this.getCursorPosition()
     const cellHeight = pos?.cellHeight || (this.domRef.current?.clientHeight / rows) || (fontSize * 1.4)
-    const needRows = Math.max(1, Math.ceil((overlayHeight + gap) / cellHeight))
+    const needRows = Math.max(1, Math.ceil((this.getSmartShellOverlayHeight(fontSize) + 12) / cellHeight) + 1)
+    this._smartShellReservedRows = needRows
     const cursorY = this.term.buffer.active.cursorY
     const cursorX = this.term.buffer.active.cursorX
     const spaceBelow = rows - cursorY - 1
@@ -753,11 +739,7 @@ class Term extends Component {
       return
     }
     // 底端：多预留 2 行空隙，避免弹窗贴住/挡住光标行
-    const extraBreathing = 2
-    const need = Math.min(
-      needRows - spaceBelow + extraBreathing,
-      Math.max(0, rows - 3)
-    )
+    const need = calculateSmartShellOverlayPadding({ rows, cursorY, reservedRows: needRows })
     if (need <= 0) {
       this._smartShellPadLines = 0
       return
@@ -765,12 +747,16 @@ class Term extends Component {
     this._smartShellPadLines = need
     // \r\n 会把列重置为 0；上移后用 CHA 恢复原列（1-based）
     const col = Math.max(1, cursorX + 1)
-    this.term.write('\r\n'.repeat(need) + `\x1b[${need}A\x1b[${col}G`)
+    this.term.write(
+      '\r\n'.repeat(need) + `\x1b[${need}A\x1b[${col}G`,
+      () => this.updateSmartShellOverlayAnchor()
+    )
   }
 
   clearSmartShellCursorSpace = () => {
     const need = this._smartShellPadLines || 0
     this._smartShellPadLines = 0
+    this._smartShellReservedRows = 0
     if (!need || !this.term) {
       return
     }
@@ -779,37 +765,36 @@ class Term extends Component {
   }
 
   getSmartShellOverlayAnchor = () => {
-    if (!this.term || (!this.state.smartShellProposal && !this.state.agentSession)) {
+    if (!this.term || !this.state.smartShellProposal) {
       return null
     }
-    const pos = this.getCursorPosition()
     const wrapEl = this.domRef.current?.parentElement
-    if (!pos || !wrapEl) {
+    if (!wrapEl) {
       return null
     }
     const wrapRect = wrapEl.getBoundingClientRect()
     const fontSize = Math.max(12, Math.min(16, this.term.options?.fontSize || 14))
     const gap = 12
-    const preferredHeight = this.state.agentSession
-      ? Math.min(wrapRect.height * 0.6, this.getAgentSessionOverlayHeight(fontSize))
-      : this.getSmartShellOverlayHeight(fontSize)
-    // 始终锚在光标行下方，绝不把弹窗上推到盖住光标
+    const preferredHeight = this.getSmartShellOverlayHeight(fontSize)
+    const pos = this.getCursorPosition()
+    if (!pos) return null
     const top = Math.max(8, pos.top - wrapRect.top + gap)
-    const available = Math.max(this.state.agentSession ? 52 : 120, wrapRect.height - top - 12)
+    const available = Math.max(120, wrapRect.height - top - 12)
     const height = Math.min(preferredHeight, available)
     return {
       top,
       left: 12,
       width: Math.max(240, wrapRect.width - 24),
       height,
-      maxHeight: height,
+      maxWidth: Math.max(240, wrapRect.width - 24),
+      maxHeight: available,
       fontSize,
       scale: Math.max(0.85, Math.min(1.15, wrapRect.width / 900))
     }
   }
 
   updateSmartShellOverlayAnchor = () => {
-    if (!this.state.smartShellProposal && !this.state.agentSession) {
+    if (!this.state.smartShellProposal) {
       if (this.state.smartShellOverlayAnchor) {
         this.setState({ smartShellOverlayAnchor: null })
       }
@@ -1103,24 +1088,470 @@ class Term extends Component {
     return true
   }
 
-  isAgentSessionActive = () => {
-    const status = this.state.agentSession?.status
-    return !!status && !['complete', 'inconclusive', 'blocked', 'failed', 'cancelled', 'partial'].includes(status)
+  isAgentSessionActive = (session = this.state.agentSession) => {
+    const status = session?.status
+    return !!status && !isTerminalAgentStatus(status)
   }
 
-  startAgentAnalysis = async (prompt, parentTaskId) => {
+  hasPendingAgentApproval = (session = this.state.agentSession) => {
+    return !!session && (session.status === 'awaiting_approval' || !!session.pendingApproval)
+  }
+
+  normalizeAgentSessionSnapshot = session => {
+    // Terminal transitions publish their state event immediately before the
+    // final-result event. Keep the existing live card until the result body is
+    // available so the user never sees an empty "finished" shell.
+    if (isTerminalAgentStatus(session?.status) && !session.finalResult) return null
+    const approvalRequestId = session?.pendingApproval?.approvalRequestId
+    if (!approvalRequestId || !this._agentConsumedApprovalIds.has(approvalRequestId)) return session
+    if (session.status === 'awaiting_approval' && !session.finalResult) return null
+    return { ...session, pendingApproval: undefined }
+  }
+
+  isNewerAgentSessionSnapshot = (nextSession, currentSession) => {
+    if (!currentSession) return true
+    const nextOrder = [
+      Number(nextSession?.snapshotVersion) || 0,
+      Number(nextSession?.lastEventSequence) || 0,
+      Number(nextSession?._projectedAt) || 0
+    ]
+    const currentOrder = [
+      Number(currentSession?.snapshotVersion) || 0,
+      Number(currentSession?.lastEventSequence) || 0,
+      Number(currentSession?._projectedAt) || 0
+    ]
+    for (let index = 0; index < nextOrder.length; index++) {
+      if (nextOrder[index] > currentOrder[index]) return true
+      if (nextOrder[index] < currentOrder[index]) return false
+    }
+    return true
+  }
+
+  updateAgentSession = (taskId, updater) => {
+    this.setState(prev => {
+      if (prev.agentSession?.taskId !== taskId) return null
+      return { agentSession: updater(prev.agentSession) }
+    })
+  }
+
+  getAgentEmbeddedRows = () => 2
+
+  isCompactAgentEmbeddedSession = session => {
+    return !!session && !session.pendingApproval && !session.pendingUserInput && !session.finalResult
+  }
+
+  shouldAnchorAgentCardBelowPrompt = () => {
+    const buffer = this.term?.buffer?.active
+    const line = readTerminalLogicalLine(buffer)
+    const prompt = readTerminalPrompt(buffer) || this._agentPendingPromptPrefix
+    return !!prompt && line.trimEnd() === String(prompt).trimEnd()
+  }
+
+  writeTerminal = (data = '') => {
+    return new Promise(resolve => {
+      if (!this.term || this.onClose) return resolve()
+      this.term.write(data, resolve)
+    })
+  }
+
+  queueAgentEmbeddedUpdate = update => {
+    this._agentEmbeddedUpdateQueue = this._agentEmbeddedUpdateQueue
+      .then(() => update())
+      .catch(error => console.error('Agent embedded card update failed', error))
+    return this._agentEmbeddedUpdateQueue
+  }
+
+  renderAgentEmbeddedSession = (session) => {
+    if (!this.term || !session) return
+    const snapshot = this.normalizeAgentSessionSnapshot(clone(session))
+    if (!snapshot) return
+    if (this._agentNativeTerminalRunningTasks.has(snapshot.taskId)) {
+      const current = this._agentPendingNativeSessions.get(snapshot.taskId)
+      if (this.isNewerAgentSessionSnapshot(snapshot, current)) {
+        this._agentPendingNativeSessions.set(snapshot.taskId, snapshot)
+      }
+      return
+    }
+    this.queueAgentEmbeddedUpdate(async () => {
+      if (!this.term || this.onClose) return
+      let entry = this._agentEmbeddedEntries.get(this._agentEmbeddedLiveKey)
+      if (entry?.taskId?.startsWith('pending_') && !snapshot.taskId.startsWith('pending_') && entry.session?.prompt === snapshot.prompt) {
+        entry.taskId = snapshot.taskId
+      }
+      if (entry?.frozen || entry?.taskId !== snapshot.taskId) entry = null
+      if (
+        entry &&
+        this.isCompactAgentEmbeddedSession(snapshot) &&
+        !this.isCompactAgentEmbeddedSession(entry.session)
+      ) {
+        entry.frozen = true
+        this._agentEmbeddedLiveKey = ''
+        this.renderAgentEmbeddedEntry(entry)
+        entry = null
+      }
+
+      if (!entry) {
+        const shouldCreate = snapshot._optimistic ||
+          ['intake', 'planning', 'policy_check', 'paused'].includes(snapshot.status) ||
+          snapshot.pendingApproval || snapshot.pendingUserInput || snapshot.finalResult
+        if (!shouldCreate) return
+        entry = await this.createAgentEmbeddedEntry(snapshot)
+      } else {
+        await this.updateAgentEmbeddedEntry(entry, snapshot)
+      }
+      if (!entry) return
+
+      if (snapshot.finalResult) {
+        entry.frozen = true
+        this._agentEmbeddedLiveKey = ''
+        entry.needsContentFit = true
+        this.renderAgentEmbeddedEntry(entry)
+        const fittedBeforePrompt = await this.fitAgentEmbeddedEntryToContent(entry)
+        await this.writeTerminal(this._agentPendingPromptPrefix || this.getCurrentPromptPrefix())
+        if (!fittedBeforePrompt) {
+          entry.needsContentFit = true
+          await this.fitAgentEmbeddedEntryToContent(entry)
+        }
+        await this.revealAgentEmbeddedFinalEntry(entry)
+        this.term?.focus()
+      }
+    })
+  }
+
+  createAgentEmbeddedEntry = async session => {
+    await this.writeTerminal(this.shouldAnchorAgentCardBelowPrompt() ? '\r\n' : '\r\x1b[2K')
+    const marker = this.term?.registerMarker(0)
+    if (!marker) return null
+    const key = `${session.taskId}:${++this._agentEmbeddedSequence}`
+    const entry = {
+      key,
+      taskId: session.taskId,
+      session,
+      marker,
+      decoration: null,
+      root: null,
+      element: null,
+      rows: this.getAgentEmbeddedRows(session),
+      needsContentFit: !this.isCompactAgentEmbeddedSession(session),
+      frozen: false
+    }
+    this._agentEmbeddedEntries.set(key, entry)
+    this._agentEmbeddedLiveKey = key
+    marker.onDispose(() => this.removeAgentEmbeddedEntry(key, false))
+    await this.writeTerminal('\r\n'.repeat(entry.rows))
+    this.registerAgentEmbeddedDecoration(entry)
+    await this.fitAgentEmbeddedEntryToContent(entry)
+    this.term?.scrollToBottom()
+    return entry
+  }
+
+  updateAgentEmbeddedEntry = async (entry, session) => {
+    if (!entry) return
+    const nextRows = this.getAgentEmbeddedRows(session)
+    const cursorLine = this.term.buffer.active.baseY + this.term.buffer.active.cursorY
+    const cursorAdjacent = cursorLine === entry.marker.line + entry.rows
+    entry.session = session
+    entry.needsContentFit = !this.isCompactAgentEmbeddedSession(session)
+    if (nextRows > entry.rows && cursorAdjacent) {
+      const addedRows = nextRows - entry.rows
+      entry.rows = nextRows
+      this.registerAgentEmbeddedDecoration(entry)
+      await this.writeTerminal('\r\n'.repeat(addedRows))
+    } else {
+      this.renderAgentEmbeddedEntry(entry)
+    }
+    await this.fitAgentEmbeddedEntryToContent(entry)
+  }
+
+  waitForAgentEmbeddedPaint = () => new Promise(resolve => {
+    window.requestAnimationFrame(() => window.requestAnimationFrame(resolve))
+  })
+
+  fitAgentEmbeddedEntryToContent = async entry => {
+    if (!entry?.marker || entry.marker.isDisposed) return false
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await this.waitForAgentEmbeddedPaint()
+      const element = entry.element
+      const overlay = element?.querySelector('.agent-session-overlay-inner.is-content-sized')
+      if (!element || !overlay) continue
+      const cellHeight = this.getAgentEmbeddedCellHeight(element)
+      const decorationStyle = window.getComputedStyle(element)
+      const verticalPadding = (Number.parseFloat(decorationStyle.paddingTop) || 0) + (Number.parseFloat(decorationStyle.paddingBottom) || 0)
+      const contentHeight = Math.max(overlay.scrollHeight, overlay.getBoundingClientRect().height) + verticalPadding + 1
+      const requiredRows = Math.max(this.getAgentEmbeddedRows(entry.session), Math.ceil(contentHeight / cellHeight))
+      if (requiredRows === entry.rows) {
+        entry.needsContentFit = false
+        return true
+      }
+      if (!await this.resizeAgentEmbeddedEntryRows(entry, requiredRows)) {
+        entry.needsContentFit = true
+        return false
+      }
+      entry.needsContentFit = false
+      return true
+    }
+    entry.needsContentFit = true
+    return false
+  }
+
+  resizeAgentEmbeddedEntryRows = async (entry, requiredRows) => {
+    if (!this.term || !entry?.marker || entry.marker.isDisposed) return false
+    const nextRows = Math.max(this.getAgentEmbeddedRows(entry.session), Math.trunc(Number(requiredRows) || 0))
+    if (nextRows === entry.rows) return true
+    const buffer = this.term.buffer.active
+    const cursorLine = buffer.baseY + buffer.cursorY
+    if (cursorLine !== entry.marker.line + entry.rows) return false
+    const rowDelta = nextRows - entry.rows
+    const currentLine = buffer.getLine(cursorLine)
+    const currentText = currentLine?.translateToString(true) || ''
+    const currentCursorX = buffer.cursorX
+    const currentEndX = this.getAgentTerminalLineEndColumn(currentLine)
+    entry.rows = nextRows
+    this.registerAgentEmbeddedDecoration(entry)
+    if (rowDelta > 0) {
+      await this.writeTerminal(`\r\x1b[2K${'\r\n'.repeat(rowDelta)}${currentText}`)
+    } else {
+      await this.writeTerminal(`\r\x1b[2K\x1b[${Math.abs(rowDelta)}F\x1b[0J${currentText}`)
+    }
+    const trailingColumns = Math.max(0, currentEndX - currentCursorX)
+    if (trailingColumns) await this.writeTerminal(`\x1b[${trailingColumns}D`)
+    this.positionAgentEmbeddedDecoration(entry)
+    return true
+  }
+
+  getAgentTerminalLineEndColumn = line => {
+    if (!line) return 0
+    let endColumn = 0
+    for (let index = 0; index < line.length; index++) {
+      const cell = line.getCell(index)
+      if (cell?.getChars()) endColumn = index + Math.max(1, cell.getWidth())
+    }
+    return endColumn
+  }
+
+  scheduleAgentEmbeddedFit = entry => {
+    window.cancelAnimationFrame(entry?.fitRaf)
+    if (!entry || entry.marker?.isDisposed) return
+    entry.fitRaf = window.requestAnimationFrame(() => {
+      entry.fitRaf = null
+      this.queueAgentEmbeddedUpdate(async () => {
+        await this.fitAgentEmbeddedEntryToContent(entry)
+        this.positionAgentEmbeddedDecoration(entry)
+      })
+    })
+  }
+
+  revealAgentEmbeddedFinalEntry = async entry => {
+    if (!this.term || !entry?.marker || entry.marker.isDisposed) return
+    await this.waitForAgentEmbeddedPaint()
+    this.term.refresh(0, Math.max(0, this.term.rows - 1))
+    if (entry.rows >= Math.max(1, this.term.rows - 1)) {
+      this.term.scrollToLine(entry.marker.line)
+    } else {
+      this.term.scrollToBottom()
+    }
+    await this.waitForAgentEmbeddedPaint()
+    this.positionAgentEmbeddedDecoration(entry)
+  }
+
+  registerAgentEmbeddedDecoration = entry => {
+    if (!this.term || !entry?.marker || entry.marker.isDisposed) return
+    if (entry.root) {
+      entry.root.unmount()
+      entry.root = null
+      entry.element = null
+    }
+    entry.decoration?.dispose?.()
+    entry.decoration = this.term.registerDecoration({
+      marker: entry.marker,
+      x: 0,
+      width: Math.max(1, this.term.cols),
+      height: entry.rows,
+      layer: 'top'
+    })
+    entry.decoration?.onRender(element => {
+      if (entry.element !== element) {
+        entry.root?.unmount?.()
+        entry.element = element
+        entry.element.classList.add('agent-session-decoration')
+        entry.root = createRoot(element)
+      }
+      this.positionAgentEmbeddedDecoration(entry, element)
+      this.renderAgentEmbeddedEntry(entry)
+      if (entry.needsContentFit) this.scheduleAgentEmbeddedFit(entry)
+    })
+    // Electron's xterm renderer may not repaint after a decoration is added to
+    // rows that were just written, so explicitly request its first render.
+    this.term.refresh(0, Math.max(0, this.term.rows - 1))
+  }
+
+  positionAgentEmbeddedDecoration = (entry, element = entry?.element) => {
+    if (!this.term || !entry?.marker || !element) return false
+    const cellHeight = this.getAgentEmbeddedCellHeight(element)
+    const canvasWidth = this.term.dimensions?.css?.canvas?.width
+    const viewportLine = entry.marker.line - this.term.buffer.active.viewportY
+    const intersectsViewport = viewportLine < this.term.rows && viewportLine + entry.rows > 0
+    element.style.display = intersectsViewport ? 'block' : 'none'
+    if (!intersectsViewport) return false
+    element.style.top = `${viewportLine * cellHeight}px`
+    element.style.height = `${entry.rows * cellHeight}px`
+    element.style.lineHeight = `${cellHeight}px`
+    if (canvasWidth) element.style.width = `${canvasWidth}px`
+    return true
+  }
+
+  getAgentEmbeddedCellHeight = element => {
+    const cell = this.term?.dimensions?.css?.cell
+    return cell?.height || (this.domRef.current?.clientHeight / this.term.rows) || Number.parseFloat(element?.style?.lineHeight) || 1
+  }
+
+  scheduleAgentEmbeddedPositions = () => {
+    window.cancelAnimationFrame(this._agentEmbeddedPositionRaf)
+    this._agentEmbeddedPositionRaf = window.requestAnimationFrame(() => {
+      this._agentEmbeddedPositionRaf = null
+      for (const entry of this._agentEmbeddedEntries.values()) {
+        this.positionAgentEmbeddedDecoration(entry)
+      }
+    })
+  }
+
+  renderAgentEmbeddedEntry = entry => {
+    if (!entry?.root || !entry.session) return
+    entry.root.render(
+      <AgentSessionOverlay
+        session={entry.session}
+        embedded
+        readOnly={entry.frozen}
+        onControl={(action, extra) => this.handleAgentEmbeddedControl(entry, action, extra)}
+        getEvidence={request => window.store.getAgentEvidence(request)}
+        deleteEvidence={request => window.store.deleteAgentEvidence(request)}
+        onHandoff={() => this.handleAgentEmbeddedHandoff(entry)}
+        finalDetailsOpen={entry.finalDetailsOpen}
+        onLayoutChange={open => {
+          entry.finalDetailsOpen = open
+          entry.needsContentFit = true
+          this.scheduleAgentEmbeddedFit(entry)
+        }}
+      />
+    )
+  }
+
+  handleAgentEmbeddedControl = async (entry, action, extra = {}) => {
+    if (!entry || entry.frozen) return false
+    const previousSession = entry.session
+    const approvedExecution = action === 'resolve_approval' &&
+      ['approve_once', 'approve_task_exact_match'].includes(extra?.decision?.choice) &&
+      ['shell.exec', 'shell.review_exec'].includes(previousSession.pendingApproval?.toolName)
+    const approvalRequestId = previousSession.pendingApproval?.approvalRequestId
+    let approvalConsumed = false
+    if (approvedExecution) {
+      approvalConsumed = await this.freezeAgentExecutedApprovalEntry(entry, extra?.decision)
+      if (!approvalConsumed) {
+        message.error('终端位置正在更新，请再次执行。')
+        return false
+      }
+      if (approvalRequestId) this._agentConsumedApprovalIds.add(approvalRequestId)
+    } else if (action === 'resolve_approval') {
+      entry.session = {
+        ...entry.session,
+        status: extra?.decision?.choice === 'reject' ? 'cancelled' : 'executing',
+        _embeddedResolvedDecision: extra?.decision
+      }
+      entry.frozen = true
+      this._agentEmbeddedLiveKey = ''
+      this.renderAgentEmbeddedEntry(entry)
+    }
+    const success = await this.handleAgentControl(action, extra, previousSession)
+    if (!success && action === 'resolve_approval') {
+      if (approvalConsumed) {
+        if (approvalRequestId) this._agentConsumedApprovalIds.delete(approvalRequestId)
+        entry.session = previousSession
+        entry.frozen = false
+        entry.needsContentFit = true
+        this._agentEmbeddedLiveKey = entry.key
+        this.renderAgentEmbeddedEntry(entry)
+        await this.fitAgentEmbeddedEntryToContent(entry)
+      } else {
+        entry.session = previousSession
+        entry.frozen = false
+        this._agentEmbeddedLiveKey = entry.key
+        this.renderAgentEmbeddedEntry(entry)
+      }
+    }
+    return success
+  }
+
+  freezeAgentExecutedApprovalEntry = async (entry, decision) => {
+    if (!this.term || !entry?.marker || entry.marker.isDisposed) return false
+    const previousSession = entry.session
+    entry.session = {
+      ...previousSession,
+      status: 'executing',
+      _embeddedResolvedDecision: decision
+    }
+    entry.frozen = true
+    entry.needsContentFit = true
+    this._agentEmbeddedLiveKey = ''
+    this.renderAgentEmbeddedEntry(entry)
+    await this.fitAgentEmbeddedEntryToContent(entry)
+    this.term.scrollToBottom()
+    return true
+  }
+
+  handleAgentEmbeddedHandoff = entry => {
+    if (!entry || entry.frozen) return
+    this.agentTerminalHandoff = true
+    this.handleAgentControl('pause', {}, entry.session).finally(() => this.term?.focus())
+  }
+
+  freezeAgentEmbeddedLiveSession = taskId => {
+    const entry = this._agentEmbeddedEntries.get(this._agentEmbeddedLiveKey)
+    if (!entry || entry.frozen || entry.taskId !== taskId) return
+    entry.frozen = true
+    this._agentEmbeddedLiveKey = ''
+    this.renderAgentEmbeddedEntry(entry)
+  }
+
+  removeAgentEmbeddedEntry = (key, disposeMarker = true) => {
+    const entry = this._agentEmbeddedEntries.get(key)
+    if (!entry) return
+    window.cancelAnimationFrame(entry.fitRaf)
+    this._agentEmbeddedEntries.delete(key)
+    if (this._agentEmbeddedLiveKey === key) this._agentEmbeddedLiveKey = ''
+    entry.root?.unmount?.()
+    entry.root = null
+    entry.decoration?.dispose?.()
+    entry.decoration = null
+    if (disposeMarker) entry.marker?.dispose?.()
+  }
+
+  disposeAgentEmbeddedEntries = () => {
+    for (const key of [...this._agentEmbeddedEntries.keys()]) {
+      this.removeAgentEmbeddedEntry(key)
+    }
+  }
+
+  startAgentAnalysis = async (prompt, parentTaskId, forceAgent = false) => {
     const currentPrompt = String(prompt || '').trim()
     if (
       !currentPrompt ||
       !this.props.config.agentModeEnabled ||
-      normalizeAgentInputMode(this.props.tab.aiInputMode) !== agentInputMode
+      (!forceAgent && normalizeAgentInputMode(this.props.tab.aiInputMode) !== agentInputMode)
     ) return false
     if (window.store.agentAiConfigMissing()) {
+      const unavailableSession = failOptimisticAgentSession(
+        createOptimisticAgentSession({
+          clientRequestId: `config_${uid()}`,
+          tabId: this.props.tab.id,
+          prompt: currentPrompt
+        }),
+        new Error('AI 配置不可用，请先完成配置。')
+      )
+      this.setState({ agentSession: unavailableSession }, () => this.renderAgentEmbeddedSession(unavailableSession))
       window.store.toggleAIConfig()
       return true
     }
     if (this.isAgentSessionActive()) {
-      this.updateSmartShellOverlayAnchor()
       return true
     }
     const clientRequestId = `client_${uid()}`
@@ -1130,10 +1561,10 @@ class Term extends Component {
       prompt: currentPrompt
     })
     this._pendingAgentStart = { clientRequestId, cancelled: false }
-    this.setState({ agentSession: optimisticSession, agentInterrupting: false }, () => {
-      this.ensureSmartShellCursorSpace()
-      this.updateSmartShellOverlayAnchor()
-    })
+    this.setState({
+      agentSession: optimisticSession,
+      agentInterrupting: false
+    }, () => this.renderAgentEmbeddedSession(optimisticSession))
     try {
       const response = await window.store.startAgentSession({
         schemaVersion: 1,
@@ -1158,87 +1589,159 @@ class Term extends Component {
         this.setState(prev => ({
           agentSession: failOptimisticAgentSession(prev.agentSession || optimisticSession, error),
           agentInterrupting: false
-        }), () => this.updateSmartShellOverlayAnchor())
+        }), () => this.renderAgentEmbeddedSession(this.state.agentSession))
       }
       return true
     }
   }
 
-  handleAgentControl = async (action, extra = {}) => {
-    const session = this.state.agentSession
+  handleAgentControl = async (action, extra = {}, targetSession) => {
+    const session = targetSession || this.state.agentSession
     if (!session) return
     if (session._optimistic) {
       if (action !== 'cancel') return false
       if (this._pendingAgentStart) this._pendingAgentStart.cancelled = true
-      this.setState({
-        agentInterrupting: false,
-        agentSession: {
-          ...session,
+      this.updateAgentSession(session.taskId, current => ({
+        ...current,
+        status: 'cancelled',
+        _optimistic: false,
+        statusReason: { code: 'user_cancelled', message: '已停止等待 AI。' },
+        finalResult: {
           status: 'cancelled',
-          _optimistic: false,
-          statusReason: { code: 'user_cancelled', message: '已停止等待 AI。' },
-          finalResult: {
-            status: 'cancelled',
-            conclusion: '任务已由用户中断。',
-            confirmedFacts: [],
-            inferences: [],
-            operations: [],
-            unresolvedItems: [],
-            evidenceRefs: []
-          }
+          conclusion: '任务已由用户中断。',
+          confirmedFacts: [],
+          inferences: [],
+          operations: [],
+          unresolvedItems: [],
+          evidenceRefs: []
         }
-      }, () => this.updateSmartShellOverlayAnchor())
+      }))
+      this.setState({ agentInterrupting: false })
+      this.renderAgentEmbeddedSession({
+        ...session,
+        status: 'cancelled',
+        _optimistic: false,
+        finalResult: {
+          status: 'cancelled',
+          conclusion: '任务已由用户中断。',
+          confirmedFacts: [],
+          inferences: [],
+          operations: [],
+          unresolvedItems: [],
+          evidenceRefs: []
+        }
+      })
       return true
     }
     if (action === 'cancel') {
-      this.setState({
-        agentInterrupting: true,
-        agentSession: {
-          ...session,
-          statusReason: { code: 'interrupting', message: '正在中断 AI…（Ctrl+C）' }
+      this.setState({ agentInterrupting: true })
+      this.updateAgentSession(session.taskId, current => ({
+        ...current,
+        statusReason: { code: 'interrupting', message: '正在中断 AI…（Ctrl+C）' }
+      }))
+    }
+    if (
+      action === 'resolve_approval' &&
+      ['approve_once', 'approve_task_exact_match'].includes(extra?.decision?.choice) &&
+      ['shell.exec', 'shell.review_exec'].includes(session.pendingApproval?.toolName)
+    ) {
+      const command = String(session.pendingApproval?.fullCommandOrArguments || '').trim()
+      if (command) {
+        const prompt = this._agentPendingPromptPrefix || this.getCurrentPromptPrefix()
+        this._agentTerminalCommands.set(session.taskId, { command, prompt })
+        if (session.pendingApproval.toolName === 'shell.review_exec') {
+          this._agentNativeTerminalTasks.add(session.taskId)
+          this._agentNativeTerminalRunningTasks.add(session.taskId)
+          this._agentNativeTerminalCompletionSignals.delete(session.taskId)
+          this._agentPendingNativeSessions.delete(session.taskId)
+          await new Promise(resolve => setTimeout(resolve, 60))
+          this.term?.write(prompt)
+          this.runQuickCommand(command)
+        } else {
+          this.term?.write(`${prompt}\x1b[36m${command}\x1b[0m\r\n`)
         }
-      })
+      }
     }
     try {
-      await window.store.controlAgentSession(session.taskId, action, extra)
+      const controlResult = await window.store.controlAgentSession(session.taskId, action, extra)
+      if (action === 'resolve_approval' && controlResult?.snapshot) {
+        this.renderAgentTerminalTranscript(controlResult.snapshot)
+      }
       return true
     } catch (error) {
       this.setState({ agentInterrupting: false })
-      if (error.latestSnapshot) this.setState({ agentSession: error.latestSnapshot })
-      else message.error(error.safeMessage || error.message)
+      if (error.latestSnapshot) {
+        this.updateAgentSession(session.taskId, () => error.latestSnapshot)
+        this.renderAgentEmbeddedSession(error.latestSnapshot)
+      } else message.error(error.safeMessage || error.message)
       return false
     }
   }
 
-  handleAgentHandoff = () => {
-    this.agentTerminalHandoff = true
-    this.handleAgentControl('pause').finally(() => this.term?.focus())
-  }
-
-  handleAgentFollowUp = () => {
-    this.clearShellInputLine()
-    this.term?.focus()
-  }
-
-  handleAgentClose = async () => {
-    if (this._agentClosing) return
-    const session = this.state.agentSession
-    if (!session) return
-    this._agentClosing = true
+  renderAgentTerminalEvidence = async (session) => {
+    const terminalStatuses = ['complete', 'inconclusive', 'blocked', 'failed', 'cancelled', 'partial']
+    if (!this.term || !session || !terminalStatuses.includes(session.status)) return
+    if (!this._agentTerminalCommands.has(session.taskId)) return
+    if (this._agentNativeTerminalTasks.has(session.taskId)) return
+    const terminalTranscript = session._terminalTranscript || session.finalResult?.terminalTranscript
+    if (this._agentRenderedTranscripts.has(terminalTranscript?.invocationId)) return
+    const refs = session.finalResult?.evidenceRefs || []
+    const evidenceRef = refs[refs.length - 1]
+    if (!evidenceRef || this._agentRenderedEvidence.has(evidenceRef) || this._agentEvidenceRendering.has(evidenceRef)) return
+    this._agentEvidenceRendering.add(evidenceRef)
     try {
-      if (this.isAgentSessionActive()) {
-        const cancelled = await this.handleAgentControl('cancel', { reason: 'user_closed_agent_panel' })
-        if (!cancelled) return
-      }
-      if (!session._optimistic) window.store.dismissAgentSession?.(session.taskId)
-      this.clearSmartShellCursorSpace()
-      this.setState({ agentSession: null, agentInterrupting: false, smartShellOverlayAnchor: null }, () => this.term?.focus())
+      let offset = 0
+      let content = ''
+      do {
+        const page = await window.store.getAgentEvidence({ taskId: session.taskId, evidenceRef, offset, limit: 64 * 1024 })
+        content += page.content || ''
+        offset = page.nextOffset
+        if (content.length > 2 * 1024 * 1024) break
+      } while (offset !== null)
+      const output = formatAgentTerminalTranscript(parseAgentEvidenceTranscript(content))
+      this.freezeAgentEmbeddedLiveSession(session.taskId)
+      this.writeAgentTerminalResult(session.taskId, output)
+      this._agentRenderedEvidence.add(evidenceRef)
     } finally {
-      this._agentClosing = false
+      this._agentEvidenceRendering.delete(evidenceRef)
     }
   }
 
-  shouldInterceptSmartShellEnter = () => {
+  renderAgentTerminalTranscript = (session) => {
+    const transcript = session?._terminalTranscript || session?.finalResult?.terminalTranscript
+    if (!this.term || !transcript?.invocationId || this._agentRenderedTranscripts.has(transcript.invocationId)) return
+    if (!this._agentTerminalCommands.has(session.taskId)) return
+    if (this._agentNativeTerminalTasks.has(session.taskId)) return
+    this.freezeAgentEmbeddedLiveSession(session.taskId)
+    const output = formatAgentTerminalTranscript(transcript)
+    this._agentRenderedTranscripts.add(transcript.invocationId)
+    this.writeAgentTerminalResult(session.taskId, output)
+  }
+
+  writeAgentTerminalResult = (taskId, output) => {
+    const execution = this._agentTerminalCommands.get(taskId)
+    if (!this.term || !execution) return
+    const result = String(output || '')
+    const separator = result && !result.endsWith('\r\n') ? '\r\n' : ''
+    this.term.write(`${result}${separator}${execution.prompt || ''}`, () => this.term?.focus())
+  }
+
+  commitAgentPromptToTerminal = (promptText) => {
+    if (!this.term || !this.attachAddon?._sendData) return false
+    const capturedLocally = this._agentInputBuffer !== null
+    const promptPrefix = this._agentInputPrompt || this.getCurrentPromptPrefix() || this._agentPendingPromptPrefix
+    this._agentPendingPromptPrefix = promptPrefix
+
+    if (!capturedLocally) this.clearShellInputLine()
+    this.resetAgentInputDraft()
+    this.term.write(
+      `${capturedLocally ? '' : `\x1b[36m${String(promptText || '')}\x1b[0m`}\r\n`,
+      () => this.term?.focus()
+    )
+    return true
+  }
+
+  shouldInterceptSmartShellEnter = (forceAgent = false) => {
     if (!this.term || this.onClose) {
       return false
     }
@@ -1257,18 +1760,20 @@ class Term extends Component {
     if (refsStatic.get('terminal-suggestions')?.state?.passwordMode) {
       return false
     }
+    if (this.hasPendingAgentApproval()) return false
 
     const currentPrompt = String(this.getCurrentInput() || '').trim()
     if (!currentPrompt) {
       return false
     }
-
     const classification = classifySmartInput(currentPrompt)
-    const inputRoute = resolveSmartInputRoute({
-      agentModeEnabled: this.props.config.agentModeEnabled === true,
-      inputMode: this.props.tab.aiInputMode,
-      inputType: classification.type
-    })
+    const inputRoute = forceAgent && this.props.config.agentModeEnabled === true
+      ? 'agent'
+      : resolveSmartInputRoute({
+        agentModeEnabled: this.props.config.agentModeEnabled === true,
+        inputMode: this.props.tab.aiInputMode,
+        inputType: classification.type
+      })
     if (inputRoute === 'terminal') {
       return false
     }
@@ -1286,18 +1791,21 @@ class Term extends Component {
       return true
     }
 
-    // Do not clear the shell line here — clear only when user clicks 执行
-    this.ensureSmartShellCursorSpace()
     if (inputRoute === 'agent') {
-      this.startAgentAnalysis(currentPrompt, this.state.agentSession?.taskId)
+      const parentTaskId = this.state.agentSession?.taskId
+      this.commitAgentPromptToTerminal(currentPrompt)
+      this.startAgentAnalysis(currentPrompt, parentTaskId, forceAgent)
     } else {
+      this.ensureSmartShellCursorSpace()
       this.startSmartShellAnalysis(currentPrompt)
     }
     this.closeSuggestions()
-    requestAnimationFrame(() => {
-      this.updateSmartShellOverlayAnchor()
-      setTimeout(() => this.updateSmartShellOverlayAnchor(), 80)
-    })
+    if (inputRoute !== 'agent') {
+      requestAnimationFrame(() => {
+        this.updateSmartShellOverlayAnchor()
+        setTimeout(() => this.updateSmartShellOverlayAnchor(), 80)
+      })
+    }
     return true
   }
 
@@ -1321,7 +1829,6 @@ class Term extends Component {
     const fromFile = dt.getData('fromFile')
     const notSafeMsg = 'File name contains unsafe characters'
     const isSshTerminal = this.props.tab.type === connectionMap.ssh
-    const isSerialTerminal = this.props.tab.type === connectionMap.serial
 
     if (fromFile) {
       try {
@@ -1341,13 +1848,6 @@ class Term extends Component {
           } else {
             this.handleDropFileAction(behavior, [{ path: filePath, isRemote: true }])
           }
-          return
-        }
-        if (isSerialTerminal) {
-          this.setState({
-            dropFileModalVisible: true,
-            droppedFiles: [{ path: filePath, isRemote: false }]
-          })
           return
         }
         this.attachAddon._sendData(`"${filePath}" `)
@@ -1378,14 +1878,6 @@ class Term extends Component {
         } else {
           this.handleDropFileAction(behavior, filePaths.map(path => ({ path, isRemote: false })))
         }
-        return
-      }
-
-      if (isSerialTerminal) {
-        this.setState({
-          dropFileModalVisible: true,
-          droppedFiles: filePaths.map(path => ({ path, isRemote: false }))
-        })
         return
       }
 
@@ -1429,19 +1921,6 @@ class Term extends Component {
         }
         window._apiControlSelectFile = filePaths
         this.attachAddon._sendData('rz\r')
-        break
-      }
-      case 'xmodem': {
-        if (this.xmodemClient && this.xmodemClient.isActive) {
-          message.warning('A transfer is already in progress')
-          this.handleDropFileModalCancel()
-          return
-        }
-        // Use XMODEM send with the dropped files
-        window._apiControlSelectFile = filePaths
-        if (this.xmodemClient) {
-          this.xmodemClient.initiateSend()
-        }
         break
       }
       case 'inputOnly':
@@ -1844,7 +2323,6 @@ class Term extends Component {
     const clearShortcut = this.getShortcut('terminal_clear')
     const searchShortcut = this.getShortcut('terminal_search')
     const selectAllShortcut = isMacJs ? 'meta+a' : 'ctrl+shift+a'
-    const isSerial = this.props.tab?.type === connectionMap.serial
     const items = [
       {
         key: 'onCopy',
@@ -1906,42 +2384,11 @@ class Term extends Component {
         label: e(recording ? 'stopRecord' : 'record')
       }
     ]
-    if (isSerial) {
-      items.push(
-        {
-          type: 'divider'
-        },
-        {
-          key: 'onXmodemSend',
-          icon: <iconsMap.CloudUploadOutlined />,
-          label: 'XMODEM Send'
-        },
-        {
-          key: 'onXmodemReceive',
-          icon: <iconsMap.CloudDownloadOutlined />,
-          label: 'XMODEM Receive'
-        }
-      )
-    }
     return items
   }
 
   onContextMenu = ({ key }) => {
     this[key]()
-  }
-
-  onXmodemSend = () => {
-    if (this.xmodemClient) {
-      this.xmodemClient.initiateSend()
-    }
-    this.term.focus()
-  }
-
-  onXmodemReceive = () => {
-    if (this.xmodemClient) {
-      this.xmodemClient.initiateReceive()
-    }
-    this.term.focus()
   }
 
   notifyOnData = debounce(() => {
@@ -2030,37 +2477,114 @@ class Term extends Component {
    * This is more reliable than tracking character-by-character
    */
   getCurrentInput = () => {
-    if (!this.term) return ''
+    const terminalInput = readTerminalInput(this.term?.buffer?.active)
+    if (this._agentInputBuffer === null) return terminalInput
+    // IME/composition can paint its final segment before xterm emits onData.
+    // Prefer the complete visual line when it is longer than the local draft.
+    return Array.from(terminalInput).length > Array.from(this._agentInputBuffer).length
+      ? terminalInput
+      : this._agentInputBuffer
+  }
 
-    const buffer = this.term.buffer.active
-    const cursorY = buffer.cursorY
-    const cursorX = buffer.cursorX
-
-    // Get the current line from buffer (baseY + cursorY gives absolute position)
-    const absoluteY = buffer.baseY + cursorY
-    const line = buffer.getLine(absoluteY)
-    if (!line) return ''
-
-    // Get text from start of line up to cursor position
-    const lineText = line.translateToString(true, 0, cursorX)
-
-    // Try to extract command after prompt
-    // Common prompt endings with trailing space
-    const promptEndings = ['$ ', '# ', '> ', '% ', '] ', ') ']
-
-    let commandStart = 0
-    for (const ending of promptEndings) {
-      const idx = lineText.lastIndexOf(ending)
-      if (idx !== -1 && idx + ending.length > commandStart) {
-        commandStart = idx + ending.length
-      }
-    }
-
-    return lineText.slice(commandStart)
+  getCurrentPromptPrefix = () => {
+    return readTerminalPrompt(this.term?.buffer?.active)
   }
 
   setCurrentInput = (value) => {
     this.currentInput = value
+  }
+
+  shouldCaptureAgentTerminalInput = () => {
+    if (!this.term || this.onClose || this.agentTerminalHandoff) return false
+    if (!this.props.config.agentModeEnabled) return false
+    if (normalizeAgentInputMode(this.props.tab.aiInputMode) !== agentInputMode) return false
+    if (this.term.buffer.active.type === 'alternate') return false
+    if (this.attachAddon?._passwordPromptDetected) return false
+    const session = this.state.agentSession
+    return !session || isTerminalAgentStatus(session.status)
+  }
+
+  renderAgentInputDraft = () => {
+    if (!this.term || this._agentInputBuffer === null) return
+    const beforeCursor = Array.from(this._agentInputBuffer).slice(0, this._agentInputCursor).join('')
+    const column = terminalTextWidth(this._agentInputPrompt) + terminalTextWidth(beforeCursor) + 1
+    this.term.write(`\r\x1b[2K${this._agentInputPrompt}\x1b[36m${this._agentInputBuffer}\x1b[0m\x1b[0K\x1b[${Math.max(1, column)}G`)
+  }
+
+  resetAgentInputDraft = () => {
+    this._agentInputBuffer = null
+    this._agentInputCursor = 0
+    this._agentInputPrompt = ''
+  }
+
+  captureAgentTerminalInput = (data) => {
+    if (this.hasPendingAgentApproval()) return true
+    if (!this.shouldCaptureAgentTerminalInput()) return false
+    const value = String(data || '')
+    if (this._agentInputBuffer === null) {
+      this._agentInputBuffer = ''
+      this._agentInputCursor = 0
+      this._agentInputPrompt = readTerminalPrompt(this.term?.buffer?.active) || this._agentPendingPromptPrefix
+    }
+    if (value === '\r' || value === '\n') {
+      const command = this._agentInputBuffer
+      if (!command.trim()) {
+        this.resetAgentInputDraft()
+        this.attachAddon?._sendData?.(value)
+        return true
+      }
+      // A literal shell command still works in Agent mode. Natural-language
+      // Enter is intercepted earlier by shouldInterceptSmartShellEnter().
+      const route = resolveSmartInputRoute({
+        agentModeEnabled: true,
+        inputMode: this.props.tab.aiInputMode,
+        inputType: classifySmartInput(command).type
+      })
+      if (route === 'terminal') {
+        const prompt = this._agentInputPrompt
+        this.term.write(`\r\x1b[2K${prompt}`)
+        this.resetAgentInputDraft()
+        this.attachAddon?._sendData?.(`${command}${value}`)
+      }
+      return true
+    }
+    if (value === '\x7f' || value === '\b') {
+      if (this._agentInputCursor > 0) {
+        const chars = Array.from(this._agentInputBuffer)
+        chars.splice(this._agentInputCursor - 1, 1)
+        this._agentInputBuffer = chars.join('')
+        this._agentInputCursor--
+        this.renderAgentInputDraft()
+      }
+      return true
+    }
+    if (value === '\x1b[D') {
+      this._agentInputCursor = Math.max(0, this._agentInputCursor - 1)
+      this.renderAgentInputDraft()
+      return true
+    }
+    if (value === '\x1b[C') {
+      this._agentInputCursor = Math.min(Array.from(this._agentInputBuffer).length, this._agentInputCursor + 1)
+      this.renderAgentInputDraft()
+      return true
+    }
+    if (value === '\x03') {
+      this.term.write(`\r\x1b[2K${this._agentInputPrompt}^C\r\n${this._agentInputPrompt}`)
+      this.resetAgentInputDraft()
+      return true
+    }
+    const pasteStart = '\x1b[200~'
+    const pasteEnd = '\x1b[201~'
+    const withoutStart = value.startsWith(pasteStart) ? value.slice(pasteStart.length) : value
+    const pasted = withoutStart.endsWith(pasteEnd) ? withoutStart.slice(0, -pasteEnd.length) : withoutStart
+    if (!isPrintableTerminalInput(pasted)) return true
+    const chars = Array.from(this._agentInputBuffer)
+    const insertion = Array.from(pasted)
+    chars.splice(this._agentInputCursor, 0, ...insertion)
+    this._agentInputBuffer = chars.join('')
+    this._agentInputCursor += insertion.length
+    this.renderAgentInputDraft()
+    return true
   }
 
   /**
@@ -2128,6 +2652,7 @@ class Term extends Component {
   }
 
   onData = (d) => {
+    if (this.hasPendingAgentApproval()) return
     if (this.isAgentSessionActive() && !this.agentTerminalHandoff && !this._agentManualPauseRequested) {
       this._agentManualPauseRequested = true
       this._agentManualInputQueue = (this._agentManualInputQueue || '') + d
@@ -2182,12 +2707,47 @@ class Term extends Component {
    * server-side echo to update the buffer.
    */
   onTerminalWrite = () => {
+    this.flushAgentNativeTerminalCompletion()
     if (!this.props.config.showCmdSuggestions) {
       return
     }
     const suggestions = refsStatic.get('terminal-suggestions')
     if (suggestions?.state?.showSuggestions && !suggestions?.state?.passwordMode) {
       this._debouncedOpenSuggestions()
+    }
+  }
+
+  signalAgentNativeCommandFinished = (command) => {
+    const executed = String(command || '').trim()
+    for (const taskId of this._agentNativeTerminalRunningTasks) {
+      const expected = String(this._agentTerminalCommands.get(taskId)?.command || '').trim()
+      if (!executed || !expected || executed === expected) {
+        this._agentNativeTerminalCompletionSignals.add(taskId)
+        break
+      }
+    }
+  }
+
+  flushAgentNativeTerminalCompletion = () => {
+    if (!this._agentNativeTerminalRunningTasks.size) return
+    if (!this.cmdAddon?.hasShellIntegration?.()) {
+      const line = readTerminalLogicalLine(this.term?.buffer?.active)
+      const prompt = readTerminalPrompt(this.term?.buffer?.active)
+      const input = readTerminalInput(this.term?.buffer?.active)
+      for (const taskId of this._agentNativeTerminalRunningTasks) {
+        const expectedPrompt = String(this._agentTerminalCommands.get(taskId)?.prompt || '')
+        if (prompt && !input && line === prompt && (!expectedPrompt || prompt === expectedPrompt)) {
+          this._agentNativeTerminalCompletionSignals.add(taskId)
+        }
+      }
+    }
+    for (const taskId of [...this._agentNativeTerminalCompletionSignals]) {
+      if (!this._agentNativeTerminalRunningTasks.has(taskId)) continue
+      this._agentNativeTerminalCompletionSignals.delete(taskId)
+      this._agentNativeTerminalRunningTasks.delete(taskId)
+      const pendingSession = this._agentPendingNativeSessions.get(taskId)
+      this._agentPendingNativeSessions.delete(taskId)
+      if (pendingSession) this.renderAgentEmbeddedSession(pendingSession)
     }
   }
 
@@ -2350,6 +2910,8 @@ class Term extends Component {
     term.parent = this
     term.onSelectionChange(this.onSelection)
     term.open(this.domRef.current, true)
+    this.agentEmbeddedScrollDisposable = term.onScroll(this.scheduleAgentEmbeddedPositions)
+    this.agentEmbeddedRenderDisposable = term.onRender(this.scheduleAgentEmbeddedPositions)
     this.registerTerminalColorQueryHandlers(term, themeConfig)
     await this.loadRenderer(term, config)
     // Re-apply the theme after the renderer is loaded. The Terminal was
@@ -2368,6 +2930,9 @@ class Term extends Component {
       if (cmd && cmd.trim()) {
         window.store.addCmdHistory(cmd.trim())
       }
+    })
+    this.cmdAddon.onCommandFinished((cmd) => {
+      this.signalAgentNativeCommandFinished(cmd)
     })
     this.cmdAddon.onCwdChanged((cwd) => {
       this.setCwd(cwd)
@@ -2760,8 +3325,6 @@ class Term extends Component {
     this.zmodemClient.init(socket)
     this.trzszClient = new TrzszClient(this)
     this.trzszClient.init(socket)
-    this.xmodemClient = new XmodemClient(this)
-    this.xmodemClient.init(socket)
     // 仅在可见时 fit，隐藏标签跳过，避免 0 列损坏提示符。
     if (this.isElementVisible()) {
       this.fitAddon.fit()
@@ -2966,38 +3529,17 @@ class Term extends Component {
   onResizeTerminal = size => {
     const { cols, rows } = size
     resizeTerm(this.pid, cols, rows)
+    window.requestAnimationFrame(() => {
+      for (const entry of this._agentEmbeddedEntries.values()) {
+        this.positionAgentEmbeddedDecoration(entry)
+      }
+      this.term?.refresh(0, Math.max(0, this.term.rows - 1))
+    })
   }
 
   handleCancel = () => {
     const { id } = this.props.tab
     this.props.delTab(id)
-  }
-
-  /**
-   * Manually triggered from the "exit gracefully" control in
-   * session-control.jsx (serial tabs only). Writes the configured key
-   * sequence (default \x01ky = Ctrl+A, k, y to kill a GNU screen window) to
-   * the socket, waits a bit so the remote end (e.g. a Bluetooth console
-   * adapter) can release cleanly, then closes the tab.
-   */
-  exitGracefully = async () => {
-    const { tab } = this.props
-    if (tab.type !== terminalSerialType) {
-      return
-    }
-    if (!this.onClose && this.attachAddon?._sendData) {
-      try {
-        const data = expandCloseSequence(tab.closeSequence || '\\x01ky')
-        if (data) {
-          this.attachAddon._sendData(data)
-        }
-      } catch (err) {
-        console.error('send close sequence failed', err)
-      }
-      const delay = Number(tab.closeSequenceDelay)
-      await new Promise(resolve => setTimeout(resolve, Number.isFinite(delay) && delay >= 0 ? delay : 500))
-    }
-    this.props.delTab(tab.id)
   }
 
   handleShowInfo = () => {
@@ -3132,23 +3674,15 @@ class Term extends Component {
           />
           <TerminalSmartShellOverlay
             proposal={this.state.smartShellProposal}
-            agentSession={this.state.agentSession}
             anchor={this.state.smartShellOverlayAnchor}
             onExecute={this.handleSmartShellExecute}
             onSave={this.handleSmartShellSave}
             onReject={this.handleSmartShellReject}
-            onAgentControl={this.handleAgentControl}
-            getAgentEvidence={request => window.store.getAgentEvidence(request)}
-            deleteAgentEvidence={request => window.store.deleteAgentEvidence(request)}
-            onAgentHandoff={this.handleAgentHandoff}
-            onAgentFollowUp={this.handleAgentFollowUp}
-            onAgentClose={this.handleAgentClose}
           />
           {this.renderResetFontSizeButton()}
           <DropFileModal
             visible={this.state.dropFileModalVisible}
             files={this.state.droppedFiles}
-            isSerial={this.props.tab?.type === connectionMap.serial}
             onSelect={this.handleDropFileAction}
             onCancel={this.handleDropFileModalCancel}
           />
@@ -3157,6 +3691,19 @@ class Term extends Component {
       </Dropdown>
     )
   }
+}
+
+function isPrintableTerminalInput (value) {
+  return Array.from(String(value || '')).some(character => {
+    const code = character.charCodeAt(0)
+    return code >= 32 && code !== 127
+  })
+}
+
+function terminalTextWidth (value) {
+  return Array.from(String(value || '')).reduce((width, character) => {
+    return width + ((character.codePointAt(0) || 0) > 255 ? 2 : 1)
+  }, 0)
 }
 
 export default shortcutDescExtend(shortcutExtend(Term))

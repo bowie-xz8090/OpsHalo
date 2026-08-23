@@ -4,7 +4,7 @@
  * This script orchestrates the loong64 legacy build process:
  * 1. Build x64 version with legacy deps to get the asar
  * 2. Download electron loong64 from Loongnix FTP
- * 3. Cross-compile native modules for loong64 (node-pty@0.10.1, serialport@10.5.0)
+ * 3. Cross-compile node-pty for loong64
  * 4. Merge x64 asar with loong64 electron and native modules
  * 5. Upload tar.gz to GitHub release draft
  * 6. Build deb package and upload to GitHub release draft

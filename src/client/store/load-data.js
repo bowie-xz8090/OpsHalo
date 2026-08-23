@@ -71,9 +71,7 @@ export async function addTabFromCommandLine (store, opts) {
   // Check if argv contains a protocol URL (e.g., ssh://user@host)
   // and use parseQuickConnect for proper parsing
   if (argv && argv.length) {
-    const protocolUrl = argv.find(arg =>
-      /^(ssh|telnet|rdp|vnc|serial|spice|ftp|http|https|electerm):\/\//i.test(arg)
-    )
+    const protocolUrl = argv.find(arg => /^(ssh|electerm):\/\//i.test(arg))
     if (protocolUrl) {
       const parsed = parseQuickConnect(protocolUrl)
       if (parsed) {
@@ -117,8 +115,8 @@ export async function addTabFromCommandLine (store, opts) {
       update.fromCmdLine = true
     }
   }
-  if (options.tp) {
-    update.type = options.tp
+  if (options.tp === 'ssh') {
+    update.type = 'ssh'
     update.fromCmdLine = true
   }
   Object.assign(conf, update)
@@ -162,8 +160,8 @@ export async function addTabFromCommandLine (store, opts) {
           parsedFallback.fromCmdLine = true
         }
       }
-      if (options.tp) {
-        parsedFallback.type = options.tp
+      if (options.tp === 'ssh') {
+        parsedFallback.type = 'ssh'
         parsedFallback.fromCmdLine = true
       }
       if (options.privateKeyPath) {

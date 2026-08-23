@@ -27,11 +27,8 @@ if (isWin) {
 }
 
 const {
-  applyMiniDepExcludes,
-  slimInstalledModules,
-  slimFrontendAssets
+  slimInstalledModules
 } = require('./mini-slim')
-applyMiniDepExcludes(pack)
 
 echo('start pack prepare')
 // echo('install test deps')
@@ -113,9 +110,8 @@ rm('-rf', 'work/app/.yarnclean')
 rm('-rf', 'work/app/package-lock.json')
 rm('-rf', 'work/app/yarn.lock')
 
-// Mini edition: drop unused deps leftovers + node-pty build junk + unused UI assets
+// Remove packaging-only type metadata and node-pty build intermediates.
 slimInstalledModules('work/app/node_modules')
-slimFrontendAssets('work/app/assets')
 
 require('./clean-empty-folders').main()
 

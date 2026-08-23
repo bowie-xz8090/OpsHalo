@@ -5,10 +5,6 @@ import { createRef } from 'react'
 import { Component } from 'manate/react/class-components'
 import Term from '../terminal/terminal.jsx'
 import Sftp from '../sftp/sftp-entry'
-import RdpSession from '../rdp/rdp-session'
-import VncSession from '../vnc/vnc-session'
-import WebSession from '../web/web-session.jsx'
-import SpiceSession from '../spice/spice-session'
 import {
   FullscreenOutlined
 } from '@ant-design/icons'
@@ -20,13 +16,7 @@ import { pick } from 'lodash-es'
 import copy from 'json-deep-copy'
 import classnames from 'classnames'
 import {
-  paneMap,
-  terminalRdpType,
-  terminalVncType,
-  terminalWebType,
-  terminalTelnetType,
-  terminalFtpType,
-  terminalSpiceType
+  paneMap
 } from '../../common/constants'
 import { refs } from '../common/ref'
 import sanitizeFilename from '../../common/sanitize-filename.js'
@@ -227,12 +217,15 @@ export default class SessionWrapper extends Component {
 
   handleAiInputModeChange = async (nextMode) => {
     const mode = normalizeAgentInputMode(nextMode)
-    if (mode === normalizeAgentInputMode(this.props.tab.aiInputMode)) return
-    if (mode === 'agent' && this.props.config.agentModeEnabled !== true) return
-    if (mode === 'agent' && window.store.agentAiConfigMissing()) {
+    const agentModeEnabled = this.props.config.agentModeEnabled === true
+    if (mode === 'agent' && (!agentModeEnabled || window.store.agentAiConfigMissing())) {
       window.store.toggleAIConfig()
       return
     }
+    const activeMode = agentModeEnabled
+      ? normalizeAgentInputMode(this.props.tab.aiInputMode)
+      : 'shell'
+    if (mode === activeMode) return
     this.setState({ aiModeSwitching: true })
     try {
       if (mode === 'shell') {
@@ -280,82 +273,7 @@ export default class SessionWrapper extends Component {
     const {
       tab
     } = this.props
-    const {
-      pane, type, sshSftpSplitView
-    } = tab
-    if (type === terminalWebType) {
-      const webProps = {
-        tab,
-        width: this.props.width,
-        height: this.props.height,
-        reloadTab: this.props.reloadTab
-      }
-      return (
-        <WebSession
-          {...webProps}
-        />
-      )
-    }
-    if (type === terminalRdpType || type === terminalVncType || type === terminalSpiceType) {
-      const rdpProps = {
-        tab: this.props.tab,
-        ...pick(this.props, [
-          'resolutions',
-          'height',
-          'width',
-          'tabsHeight',
-          'leftSidePanelWidth',
-          'pinned',
-          'openedSideBar',
-          'delTab',
-          'config',
-          'reloadTab',
-          'editTab',
-          'fullscreen'
-        ]),
-        ...pick(
-          this,
-          [
-            'fullscreenIcon'
-          ])
-      }
-      if (type === terminalVncType) {
-        return (
-          <VncSession
-            {...rdpProps}
-          />
-        )
-      }
-      if (type === terminalSpiceType) {
-        return (
-          <SpiceSession
-            {...rdpProps}
-          />
-        )
-      }
-
-      return (
-        <RdpSession
-          {...rdpProps}
-        />
-      )
-    }
-
-    if (type === terminalFtpType) {
-      const ftpProps = {
-        ...this.props,
-        ...pick(this, [
-          'onChangePane',
-          'setCwd'
-        ]),
-        isFtp: true
-      }
-      return (
-        <Sftp
-          {...ftpProps}
-        />
-      )
-    }
+    const { pane, sshSftpSplitView } = tab
 
     const cls = pane === paneMap.terminal ||
       (sshSftpSplitView && this.canSplitView())
@@ -399,16 +317,6 @@ export default class SessionWrapper extends Component {
         />
       </div>
     )
-  }
-
-  isNotTerminalType = () => {
-    const { type } = this.props.tab
-    return type === terminalRdpType ||
-      type === terminalVncType ||
-      type === terminalWebType ||
-      type === terminalTelnetType ||
-      type === terminalFtpType ||
-      type === terminalSpiceType
   }
 
   calcSftpWidthHeight = () => {
@@ -462,7 +370,6 @@ export default class SessionWrapper extends Component {
     } = this.state
     const { pane, id, sshSftpSplitView } = this.props.tab
     if (
-      this.isNotTerminalType() ||
       this.isSftpDisabled()
     ) {
       return null
@@ -514,10 +421,6 @@ export default class SessionWrapper extends Component {
     }
     const enabled = term.toggleKeepalive()
     this.setState({ keepaliveEnabled: enabled })
-  }
-
-  handleExitGracefully = () => {
-    refs.get('term-' + this.props.tab.id)?.exitGracefully()
   }
 
   handleOpenSearch = () => {
@@ -584,9 +487,6 @@ export default class SessionWrapper extends Component {
   }
 
   renderViews = () => {
-    if (this.isNotTerminalType()) {
-      return this.renderTerminals()
-    }
     const notSplitVew = !this.canSplitView() || !this.props.tab.sshSftpSplitView
     const { pane } = this.props.tab
     const show1 = notSplitVew && pane === paneMap.terminal
@@ -672,7 +572,6 @@ export default class SessionWrapper extends Component {
           showSidebarControl={this.props.leftSideBarWidth === 0}
           isDisabled={this.isDisabled()}
           isSshDisabled={this.isSshDisabled()}
-          isNotTerminalType={this.isNotTerminalType()}
           canSplitView={this.canSplitView()}
           sftpPathFollowSsh={this.state.sftpPathFollowSsh}
           keepaliveEnabled={this.state.keepaliveEnabled}
@@ -681,8 +580,9 @@ export default class SessionWrapper extends Component {
           encoding={this.state.encoding}
           delKeyPressed={this.state.delKeyPressed}
           hideDelKeyTip={this.props.hideDelKeyTip}
-          agentModeEnabled={this.props.config.agentModeEnabled === true}
-          aiInputMode={normalizeAgentInputMode(this.props.tab.aiInputMode)}
+          aiInputMode={this.props.config.agentModeEnabled === true
+            ? normalizeAgentInputMode(this.props.tab.aiInputMode)
+            : 'shell'}
           aiModeSwitching={this.state.aiModeSwitching}
           onChangePane={(pane) => this.onChangePane(pane)}
           onChangeAiInputMode={this.handleAiInputModeChange}
@@ -697,7 +597,6 @@ export default class SessionWrapper extends Component {
           onSwitchEncoding={this.handleSwitchEncoding}
           onShowSidebar={this.handleShowSidebar}
           onDismissDelKeyTip={this.handleDismissDelKeyTip}
-          onExitGracefully={this.handleExitGracefully}
           onReload={() => this.props.reloadTab(this.props.tab)}
         />
         {this.renderViews()}

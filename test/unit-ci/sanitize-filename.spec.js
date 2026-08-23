@@ -1,7 +1,7 @@
 const { describe, it, before } = require('node:test')
 const assert = require('node:assert/strict')
 
-// Server-side (CJS) — used by zmodem, xmodem, trzsz
+// Server-side (CJS) - used by zmodem and trzsz
 const sanitizeApp = require('../../src/app/common/sanitize-filename')
 
 function runTests (getFn) {
@@ -104,7 +104,7 @@ describe('sanitizeFilename', () => {
     sanitizeClient = mod.default
   })
 
-  describe('server (CJS) — zmodem/xmodem/trzsz', () => {
+  describe('server (CJS) - zmodem/trzsz', () => {
     runTests(() => sanitizeApp)
   })
 

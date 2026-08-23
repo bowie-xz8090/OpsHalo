@@ -47,4 +47,37 @@ class SecretRedactor {
   }
 }
 
-module.exports = { SecretRedactor, patterns, placeholder }
+class StreamingSecretRedactor {
+  constructor (redactor = new SecretRedactor(), tailChars = 1024) {
+    this.redactor = redactor
+    this.tailChars = Math.max(256, Math.min(Number(tailChars) || 1024, 8192))
+    this.buffer = ''
+  }
+
+  push (value) {
+    this.buffer += String(value || '')
+    if (hasOpenPrivateKey(this.buffer) || this.buffer.length <= this.tailChars) return emptyRedaction()
+    const cut = this.buffer.length - this.tailChars
+    const raw = this.buffer.slice(0, cut)
+    this.buffer = this.buffer.slice(cut)
+    return this.redactor.redact(raw)
+  }
+
+  flush () {
+    const result = this.redactor.redact(this.buffer)
+    this.buffer = ''
+    return result
+  }
+}
+
+function hasOpenPrivateKey (value) {
+  const begin = value.lastIndexOf('-----BEGIN ')
+  if (begin < 0) return false
+  return value.indexOf('PRIVATE KEY-----', begin) >= 0 && value.indexOf('-----END ', begin) < 0
+}
+
+function emptyRedaction () {
+  return { text: '', summary: { count: 0, types: [], failedClosedChunks: 0 }, failed: false }
+}
+
+module.exports = { SecretRedactor, StreamingSecretRedactor, patterns, placeholder, hasOpenPrivateKey }

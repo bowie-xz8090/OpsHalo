@@ -5,7 +5,6 @@
 import { terminalTypes } from '../../../common/constants'
 import defaultSettings from '../../../common/default-setting'
 import encodes from '../common/encodes'
-import { isEmpty } from 'lodash-es'
 
 const e = window.translate
 
@@ -217,12 +216,6 @@ export const commonFields = {
   },
 
   // Dynamic sections
-  quickCommands: {
-    type: 'quickCommands',
-    name: '__quick__',
-    label: ''
-  },
-
   sshTunnels: {
     type: 'sshTunnels',
     name: '__tunnels__',
@@ -321,34 +314,7 @@ export const sshAuthFields = [
   commonFields.type
 ]
 
-// Telnet auth fields - similar to SSH but with filtered auth types (no privateKey)
-export const telnetAuthFields = [
-  commonFields.category,
-  commonFields.title,
-  commonFields.host,
-  commonFields.username,
-  commonFields.password,
-  commonFields.loginPrompt,
-  commonFields.passwordPrompt,
-  { type: 'profileItem', name: '__profile__', label: '', profileFilter: d => !isEmpty(d.telnet) },
-  commonFields.port,
-  commonFields.runScripts,
-  commonFields.description,
-  commonFields.setEnv,
-  commonFields.startDirectoryLocal,
-  commonFields.startDirectory,
-  commonFields.interactiveValues,
-  commonFields.encode,
-  commonFields.type
-]
-
 // Common tab configurations - functions to ensure translation happens at render time
-export const quickCommandsTab = () => ({
-  key: 'quickCommands',
-  label: e('quickCommands'),
-  fields: [commonFields.quickCommands]
-})
-
 export const sshTunnelTab = () => ({
   key: 'tunnel',
   label: e('sshTunnel'),

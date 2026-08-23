@@ -1,11 +1,10 @@
 /**
- * terminal/sftp/serial class
+ * local terminal session
  */
 
 const { resolve: pathResolve } = require('path')
 const { TerminalBase } = require('./session-base')
 const globalState = require('./global-state')
-// const { MockBinding } = require('@serialport/binding-mock')
 // MockBinding.createPort('/dev/ROBOT', { echo: true, record: true })
 
 class TerminalLocal extends TerminalBase {

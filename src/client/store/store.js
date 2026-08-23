@@ -11,7 +11,6 @@ import bookmarkGroupExtend from './bookmark-group'
 import bookmarkExtend from './bookmark'
 import commonExtend from './common'
 import itemExtend from './item'
-import quickCommandExtend from './quick-command'
 import sessionExtend from './session'
 import settingExtend from './setting'
 import sidebarExtend from './sidebar'
@@ -29,7 +28,6 @@ import workspaceExtend from './workspace'
 import agentSessionExtend from './agent-session'
 import isColorDark from '../common/is-color-dark'
 import { getReverseColor } from '../common/reverse-color'
-import { uniq } from 'lodash-es'
 import deepCopy from 'json-deep-copy'
 import getBrand from '../components/ai/get-brand'
 import {
@@ -88,23 +86,6 @@ class Store {
     return deepCopy(window.store._config)
   }
 
-  get currentQuickCommands () {
-    const { currentTab } = this
-    const { quickCommands } = window.store
-    const currentTabQuickCommands = (
-      currentTab?.quickCommands || []
-    ).map((d, i) => {
-      return {
-        ...d,
-        id: 'tab-qm-' + currentTab.id + '#' + i
-      }
-    })
-    return [
-      ...currentTabQuickCommands,
-      ...quickCommands
-    ]
-  }
-
   get currentTab () {
     const {
       activeTabId
@@ -148,32 +129,8 @@ class Store {
     if (!currentTab) {
       return false
     }
-    const {
-      type
-    } = currentTab
-    if (type === 'web' || type === 'rdp' || type === 'vnc' || type === 'spice') {
-      return false
-    }
     return currentTab.sshSftpSplitView ||
       currentTab.pane === paneMap.terminal
-  }
-
-  get defaultProfileId () {
-    const { profiles } = window.store
-    const defaultProfile = profiles.find(p => p.isDefault)
-    return defaultProfile?.id || ''
-  }
-
-  get quickCommandTags () {
-    const { quickCommands } = window.store
-    return uniq(
-      quickCommands.reduce((p, q) => {
-        return [
-          ...p,
-          ...(q.labels || [])
-        ]
-      }, [])
-    )
   }
 
   get isTransporting () {
@@ -204,21 +161,11 @@ class Store {
     const { store } = window
     const historyCommands = store.terminalCommandHistory.map(item => item.cmd)
     const batchInputCommands = store.batchInputs || []
-    const quickCommands = (store.quickCommands || []).reduce(
-      (p, q) => {
-        return [
-          ...p,
-          ...(q.commands || []).map(c => c.command)
-        ]
-      },
-      []
-    )
-
     // Return raw commands
     return {
       history: historyCommands,
       batch: batchInputCommands,
-      quick: quickCommands
+      quick: []
     }
   }
 
@@ -319,7 +266,6 @@ bookmarkGroupExtend(Store)
 bookmarkExtend(Store)
 commonExtend(Store)
 itemExtend(Store)
-quickCommandExtend(Store)
 sessionExtend(Store)
 settingExtend(Store)
 sidebarExtend(Store)

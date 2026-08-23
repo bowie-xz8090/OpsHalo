@@ -14,6 +14,8 @@ OpsHalo 是一款面向 Linux 服务器排障与操作的 AI SSH/SFTP 运维工�
 - 变更、敏感命令、网络动作和交互操作必须由用户明确确认。
 - 输出脱敏与截断、本地证据、超时、循环预算、Ctrl+C 中断和变更后验证。
 - OpenAI Compatible/API Key 与 ChatGPT/Codex Subscription 两类 AI 后端互斥启用。
+- 支持模型角色配置与能力探测、有界 Skill、显式本地知识源及来源引用。
+- Provider 流式响应、真实命令输出进度、任务级会话复用和证据化最终综合均受顺序回滚开关保护。
 
 ## Agent 工作流
 

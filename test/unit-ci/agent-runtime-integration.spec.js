@@ -16,7 +16,7 @@ const { StrictJsonHarnessAdapter } = require('../../src/app/agent/harness/strict
 const { parseMessage } = require('../../src/app/agent/harness/decision-parser')
 const { classifyHarnessError } = require('../../src/app/agent/harness/harness-errors')
 const { buildPrompt } = require('../../src/app/agent/harness/prompt-builder')
-const { AgentSessionManager, containsSensitiveMaterial, mutationVerificationResult } = require('../../src/app/agent/session/session-manager')
+const { AgentSessionManager, containsSensitiveMaterial, mutationVerificationResult, buildVerificationFollowUp, completionOutcome, summarizeVerifiedFacts } = require('../../src/app/agent/session/session-manager')
 const { reduceSession } = require('../../src/app/agent/session/state-machine')
 const { AgentSessionRecordSchema } = require('../../src/app/agent/schemas/session-schema')
 const { FinalResultSchema } = require('../../src/app/agent/schemas/verification-schema')
@@ -81,6 +81,46 @@ function session () {
   }
 }
 
+test('direct location results answer the original question without unrelated facts', () => {
+  const facts = [
+    { confidence: 'observed', statement: 'nginx=the configuration file /etc/nginx/nginx.conf syntax is ok' },
+    { confidence: 'observed', statement: 'location=/404.html {' },
+    { confidence: 'observed', statement: 'location=/50x.html {' }
+  ]
+  assert.equal(summarizeVerifiedFacts(facts, 'nginx配置在哪里'), 'Nginx 配置文件位于 /etc/nginx/nginx.conf。')
+  assert.equal(summarizeVerifiedFacts(facts, 'Where is the nginx configuration file?'), 'Nginx is located at /etc/nginx/nginx.conf.')
+})
+
+test('a verified direct path completes the lookup despite unrelated completion warnings', () => {
+  const record = session()
+  record.prompt = 'nginx配置在哪里'
+  record.memory.facts = [
+    { factId: 'fact_nginx_path_12345', confidence: 'observed', statement: 'nginx=the configuration file /etc/nginx/nginx.conf syntax is ok', evidenceRefs: ['evidence://task/evidence'] },
+    { factId: 'fact_nginx_location_12345', confidence: 'observed', statement: 'location=/404.html {', evidenceRefs: ['evidence://task/evidence'] }
+  ]
+  record.evidenceRefs = ['evidence://task/evidence']
+  const outcome = completionOutcome(record, {
+    status: 'inconclusive',
+    criterionResults: [],
+    unresolved: ['关键证据存在未解决的矛盾'],
+    warnings: ['命令输出中的信息不一致，暂时无法确认最终结果。'],
+    maySynthesize: true
+  })
+  assert.equal(outcome.status, 'complete')
+  assert.equal(outcome.decision.status, 'satisfied')
+  assert.equal(outcome.finalResult.conclusion, 'Nginx 配置文件位于 /etc/nginx/nginx.conf。')
+  assert.deepEqual(outcome.finalResult.unresolvedItems, [])
+  record.evidenceRefs = []
+  const unsupported = completionOutcome(record, {
+    status: 'inconclusive',
+    criterionResults: [],
+    unresolved: ['尚未获得可引用证据'],
+    warnings: ['目前的命令输出还不能确认全部结果。'],
+    maySynthesize: false
+  })
+  assert.equal(unsupported.status, 'inconclusive')
+})
+
 function action (command, verificationPlan) {
   return {
     schemaVersion: 1,
@@ -116,9 +156,9 @@ function verificationPlan () {
   }
 }
 
-function gateway () {
+function gateway (adapter = { execute: async () => ({ stdout: '', stderr: '', exitCode: 0 }) }) {
   const registry = new ToolRegistry()
-  registerShellTools(registry, { execute: async () => ({ stdout: '', stderr: '', exitCode: 0 }) })
+  registerShellTools(registry, adapter)
   const capabilities = new CapabilityTokenManager(crypto.randomBytes(32))
   return new ToolGateway({
     registry,
@@ -129,6 +169,37 @@ function gateway () {
     audit: { append: () => {} }
   })
 }
+
+test('reviewed shell text survives the full Gateway execution contract', async () => {
+  const output = [
+    '---SYNTAX CHECK---',
+    'nginx: configuration file /etc/nginx/nginx.conf test is successful',
+    '---CONFIG PATH---',
+    '/etc/nginx/nginx.conf',
+    '---MAIN CONFIG---',
+    'user nginx;',
+    'worker_processes auto;'
+  ].join('\n')
+  const toolGateway = gateway({ execute: async () => ({ stdout: output, stderr: '', exitCode: 0 }) })
+  const current = { ...session(), featurePolicyVersion: 'test-policy' }
+  const reviewedAction = {
+    ...action('nginx -t 2>&1'),
+    toolName: 'shell.review_exec',
+    purpose: 'inspect nginx configuration',
+    expectedObservation: 'nginx configuration facts'
+  }
+  const prepared = await toolGateway.prepare(current, reviewedAction)
+  assert.equal(prepared.decision.outcome, 'require_approval')
+  const approved = toolGateway.resolveApproval(current, {
+    approvalRequestId: prepared.approval.approvalRequestId,
+    choice: 'approve_once',
+    intentDigest: prepared.intent.intentDigest,
+    decidedAt: new Date().toISOString()
+  })
+  const executed = await toolGateway.execute(current, prepared.intent, approved.capability, undefined, prepared.timeoutMs)
+  assert.equal(executed.result.status, 'success')
+  assert.equal(executed.streams.stdout, output)
+})
 
 test('mutating shell commands are upgraded and require a verification plan before approval', async () => {
   const toolGateway = gateway()
@@ -149,14 +220,14 @@ test('mutating shell commands are upgraded and require a verification plan befor
   assert.ok(unknown.decision.matchedRuleIds.includes('verification_plan_required'))
 })
 
-test('task exact approval matches action content but never reuses an invocation capability', async () => {
+test('shell approval is one-shot and a repeated command requires fresh confirmation', async () => {
   const toolGateway = gateway()
   const current = session()
   const first = await toolGateway.prepare(current, action('systemctl restart nginx', verificationPlan()))
-  assert.ok(first.approval.allowedDecisions.includes('approve_task_exact_match'))
+  assert.deepEqual(first.approval.allowedDecisions, ['reject', 'cancel_task', 'approve_once'])
   const resolved = toolGateway.resolveApproval(current, {
     approvalRequestId: first.approval.approvalRequestId,
-    choice: 'approve_task_exact_match',
+    choice: 'approve_once',
     intentDigest: first.intent.intentDigest,
     decidedAt: new Date().toISOString()
   })
@@ -165,8 +236,34 @@ test('task exact approval matches action content but never reuses an invocation 
   const repeated = await toolGateway.prepare(current, repeatedAction)
   assert.equal(repeated.intent.intentDigest, first.intent.intentDigest)
   assert.equal(repeated.intent.invocationId, 'invocation_repeated_12345')
-  assert.equal(repeated.decision.outcome, 'allow')
-  assert.equal(repeated.approvalRequestId, first.approval.approvalRequestId)
+  assert.equal(repeated.decision.outcome, 'require_approval')
+  assert.notEqual(repeated.approval.approvalRequestId, first.approval.approvalRequestId)
+})
+
+test('mutation postcheck becomes a separately confirmable follow-up command', () => {
+  const current = session()
+  const plan = {
+    ...verificationPlan(),
+    postconditions: [{
+      ...verificationPlan().postconditions[0],
+      intent: {
+        toolName: 'shell.review_exec',
+        arguments: { command: 'cat test.txt' },
+        target: { kind: 'file', canonicalId: '/srv/app/test.txt', display: 'test.txt' },
+        purpose: '验证文件内容'
+      }
+    }]
+  }
+  const followUp = buildVerificationFollowUp({
+    publicTools: () => [{ name: 'shell.review_exec', version: '1' }]
+  }, current, {
+    invocationId: 'invocation_change_12345',
+    verificationPlan: plan
+  })
+  assert.equal(followUp.intent.toolName, 'shell.review_exec')
+  assert.equal(followUp.intent.arguments.command, 'cat test.txt')
+  assert.equal(followUp.intent.taskId, current.taskId)
+  assert.equal(followUp.intent.verificationPlan, undefined)
 })
 
 test('SSH and SFTP capabilities use the task policy version after settings refresh', async () => {
@@ -573,7 +670,7 @@ test('sensitive-value detector rejects supplied secrets without blocking ordinar
   assert.equal(containsSensitiveMaterial('check whether API_KEY is configured, but do not reveal it'), false)
 })
 
-test('Strands adapter creates a fresh no-tools Agent for every fact-ledger turn', async () => {
+test('Strands adapter reuses one no-tools Agent for every fact-ledger turn in a task', async () => {
   let created = 0
   const toolLists = []
   const decision = {
@@ -607,10 +704,10 @@ test('Strands adapter creates a fresh no-tools Agent for every fact-ledger turn'
   for await (const event of adapter.runTurn(input)) first.push(event)
   const second = []
   for await (const event of adapter.runTurn(input)) second.push(event)
-  assert.equal(created, 2)
-  assert.deepEqual(toolLists, [[], []])
-  assert.equal(first.at(-1).type, 'decision')
-  assert.equal(second.at(-1).type, 'decision')
+  assert.equal(created, 1)
+  assert.deepEqual(toolLists, [[]])
+  assert.equal(first.at(-1).type, 'decision.completed')
+  assert.equal(second.at(-1).type, 'decision.completed')
 })
 
 test('Strands adapter repairs invalid structured output once and then fails closed to suggestion mode', async () => {
@@ -656,7 +753,7 @@ test('Strands adapter repairs invalid structured output once and then fails clos
   for await (const event of invalid.runTurn(input)) degradedEvents.push(event)
   assert.equal(invalidCalls, 2)
   assert.equal(degradedEvents.find(event => event.code === 'suggestion_mode_required')?.code, 'suggestion_mode_required')
-  assert.equal(degradedEvents.at(-1).decision.goalStatus, 'need_user')
+  assert.equal(degradedEvents.at(-1).decision.goalStatus, 'blocked')
   assert.equal(degradedEvents.at(-1).decision.action, undefined)
 })
 
@@ -690,7 +787,7 @@ test('strict JSON adapter repairs once and native function decisions use the sam
   const degraded = []
   for await (const event of invalid.runTurn({ objective: 'inspect', mode: 'diagnose', sessionSummary: {}, workingMemory: {}, budgetRemaining: {}, availableTools: [] })) degraded.push(event)
   assert.equal(degraded.find(event => event.code === 'suggestion_mode_required')?.code, 'suggestion_mode_required')
-  assert.equal(degraded.at(-1).decision.goalStatus, 'need_user')
+  assert.equal(degraded.at(-1).decision.goalStatus, 'blocked')
   assert.equal(degraded.at(-1).decision.action, undefined)
 })
 

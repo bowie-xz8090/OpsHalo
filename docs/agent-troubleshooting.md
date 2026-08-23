@@ -2,13 +2,21 @@
 
 ## Agent 未启动
 
-确认 AI 配置完整、`agentModeEnabled` 已开启并重启应用。总开关关闭时仍使用旧 Smart Shell，这是预期兼容行为。
+确认 AI 配置完整并已开启“终端 Agent”。保存成功后新任务即可使用；正在运行的任务会继续使用启动时配置，待其暂停或结束后应用新配置。若完整退出后开关恢复为关闭，先确认启动的是独立 `OpsHalo.app`，而不是 `node_modules/electron` 的默认应用，并检查应用数据目录是否被清理或被 E2E 的临时 `DATA_PATH` 替代。
 
 如果选择 Codex Subscription，还需至少有一个状态为 `authenticated` 的当前账号。App Server、OAuth、额度和账号切换问题见 [`agent-codex-subscription.md`](agent-codex-subscription.md)。Codex 后端失败不会自动改用已保存的 API Key。
 
-## 一直显示证据不足
+## 分析结果显示“仍需确认”
 
-查看 Timeline 中的 `missingInformation`、截断提示和完成判据。Agent 会在信息不足、证据矛盾、预算用尽或变更未验证时主动停止。缩小问题范围或提供非敏感补充信息后发起 follow-up；不要粘贴密码、私钥或 token。
+展开“查看分析依据和待确认内容”，检查哪些命令输出不一致、被截断或尚未验证。Agent 会在信息不足、结果互相冲突、预算用尽或变更未验证时停止，不会显示内部 fact id、引用校验术语或“证据不足”等实现文案。缩小问题范围或提供非敏感补充信息后重新提问；不要粘贴密码、私钥或 token。
+
+## 下一步卡片过高或历史消失
+
+正式版本的 Agent 卡片必须嵌入 xterm scrollback：规划中只占紧凑状态行，结果出来后按完整内容扩展，不使用卡内纵向滚动条。历史卡固定在创建时的 buffer 行，通过终端滚动条查看。如果仍出现浮动、大片留白或越界隐藏，通常是旧静态 chunk 缓存或启动了旧 app bundle；在“信息”中核对版本，完整退出所有 OpsHalo/Electron 进程后从最新 `OpsHalo.app` 重启。
+
+## 能力探测失败
+
+`不可用`通常表示认证、网络或 Provider endpoint 失败；`能力有限`表示流式结束、结构化 schema、取消或声明 token 上限中至少一项未通过。探测不会执行服务器命令。先核对 backend、base URL、API path、model 和账号状态；修改任一 profile 配置后需要重新探测。不要通过同时配置另一计费路径来期待自动回退，API Key 与 Codex Subscription 始终互斥。
 
 ## 命令被阻断
 
@@ -25,3 +33,7 @@
 ## 证据或任务占用空间
 
 在最终卡或 Evidence Drawer 清理证据。自动清理周期和配额见 `agent-security-privacy.md`。任务 snapshot 元数据默认保留 7 天；Audit 默认 30 天/50 MiB。
+
+## Skill 或知识源没有生效
+
+检查路径是否为绝对路径、文件扩展名和大小是否受支持，并确认没有符号链接或路径越界。Skill 需要合法 `skill.json`；知识目录只读取当前目录中的支持文件。索引损坏会从显式来源重建。引用显示“来源已变化”时，重新保存设置或刷新配置以重建索引；不要把知识文档当作当前服务器状态，远端事实仍需命令验证。

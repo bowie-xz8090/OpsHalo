@@ -54,9 +54,7 @@ export default auto(function SettingModalWrap (props) {
       hide: store.hideSettingModal,
       ...pick(store, [
         'config'
-      ]),
-      serials: store.serials,
-      loaddingSerials: store.loaddingSerials
+      ])
     }
     const items = [
       {

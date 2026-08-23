@@ -1,10 +1,7 @@
 import { auto } from 'manate/react'
 import Layouts from './layouts'
 import TabsWrap from '../tabs/index'
-import {
-  splitConfig,
-  quickCommandBoxHeight
-} from '../../common/constants'
+import { splitConfig } from '../../common/constants'
 import layoutAlg from './layout-alg'
 import calcSessionSize from './session-size-alg'
 import TermSearch from '../terminal/term-search'
@@ -28,7 +25,6 @@ export default auto(function Layout (props) {
     const {
       width,
       height,
-      pinnedQuickCommandBar,
       // tabsHeight,
       leftSidePanelWidth,
       leftSideBarWidth,
@@ -37,10 +33,9 @@ export default auto(function Layout (props) {
       rightPanelVisible,
       rightPanelPinned,
       rightPanelWidth,
-      resizeTrigger,
-      inActiveTerminal
+      resizeTrigger
     } = props.store
-    const h = height - (inActiveTerminal && pinnedQuickCommandBar ? quickCommandBoxHeight : 0) + resizeTrigger
+    const h = height + resizeTrigger
     const l = pinned ? leftSideBarWidth + leftSidePanelWidth : leftSideBarWidth
     const r = rightPanelVisible && rightPanelPinned ? rightPanelWidth : 0
     return {
@@ -56,7 +51,6 @@ export default auto(function Layout (props) {
       layout,
       height,
       width,
-      pinnedQuickCommandBar,
       leftSidePanelWidth,
       leftSideBarWidth,
       rightPanelVisible,
@@ -69,7 +63,7 @@ export default auto(function Layout (props) {
     // account for the far-left icon bar (sidebarWidth - 1px border on desktop;
     // 0 when the bar is hidden on mobile)
     const w = width - l - r - (leftSideBarWidth > 0 ? leftSideBarWidth - 1 : 0)
-    const h = height - (pinnedQuickCommandBar ? quickCommandBoxHeight : 0)
+    const h = height
     return layoutAlg(layout, w, h)
   }
   const layoutSize = calcLayoutStyle()
@@ -110,10 +104,8 @@ export default auto(function Layout (props) {
         ...pick(store, [
           'isMaximized',
           'config',
-          'resolutions',
           'hideDelKeyTip',
           'fileOperation',
-          'pinnedQuickCommandBar',
           'tabsHeight',
           'appPath',
           'leftSidePanelWidth',
@@ -157,11 +149,9 @@ export default auto(function Layout (props) {
       'activeTabId2',
       'activeTabId3',
       'batch',
-      'resolutions',
       'hideDelKeyTip',
       'fileOperation',
       'file',
-      'pinnedQuickCommandBar',
       'tabsHeight',
       'appPath',
       'leftSidePanelWidth',

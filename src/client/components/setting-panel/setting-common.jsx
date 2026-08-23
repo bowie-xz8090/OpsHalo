@@ -443,6 +443,24 @@ export default class SettingCommon extends Component {
     return (
       <div className='form-wrap pd1y pd2x'>
         <h2>{e('settings')}</h2>
+        <div className='pd2b'>
+          <span className='inline-title mg1r'>{e('language')}</span>
+          <Select
+            onChange={this.handleChangeLang}
+            value={language}
+            popupMatchSelectWidth={false}
+          >
+            {
+              langs.map(l => {
+                const { id, name } = l
+                return (
+                  <Option key={id} value={id}>{name}</Option>
+                )
+              })
+            }
+          </Select>
+          <Link className='mg1l' to={createEditLangLink(language)}>{e('edit')}</Link>
+        </div>
         {this.renderProxy()}
         {
           this.renderNumber('sshReadyTimeout', {
@@ -518,24 +536,6 @@ export default class SettingCommon extends Component {
           />
         </div>
 
-        <div className='pd2b'>
-          <span className='inline-title mg1r'>{e('language')}</span>
-          <Select
-            onChange={this.handleChangeLang}
-            value={language}
-            popupMatchSelectWidth={false}
-          >
-            {
-              langs.map(l => {
-                const { id, name } = l
-                return (
-                  <Option key={id} value={id}>{name}</Option>
-                )
-              })
-            }
-          </Select>
-          <Link className='mg1l' to={createEditLangLink(language)}>{e('edit')}</Link>
-        </div>
         <div className='pd1b'>{e('default')} {e('execWindows')}</div>
         {
           this.renderTextExec('execWindows')

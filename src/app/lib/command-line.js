@@ -30,14 +30,6 @@ opshalo -sp 30976
 - load and run batch operation from json file:
 opshalo -bo "/home/root/works.json"
 
-### other connection types
-- telnet:
-opshalo -tp "telnet" -opts '{"host":"192.168.1.1","port":21","username":"root","password":"123456"}'
-- rdp: opshalo -tp "rdp" -opts '{"host":"192.168.1.1","port":3389","username":"root","password":"123456"}'
-- vnc: opshalo -tp "vnc" -opts '{"host":"192.168.1.1","port":3389","username":"root","password":"123456"}'
-- serial: opshalo -tp "serial" -opts '{"port":"COM1","baudRate":115200,"dataBits":8,"stopBits":1,"parity":"none"}'
-- local: opshalo -tp "local" -opts '{"title": "local terminal"}'
-
 ### Environment variables:
 - DATA_PATH:
 DATA_PATH=/custom/path/to/opshalo-data opshalo

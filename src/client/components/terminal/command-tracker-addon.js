@@ -33,6 +33,7 @@ export class CommandTrackerAddon {
 
     // Event callbacks for shell integration events
     this._onCommandExecuted = null // Called when OSC 633;E is received
+    this._onCommandFinished = null // Called when OSC 633;D is received
     this._onCwdChanged = null // Called when OSC 633;P;Cwd= is received
   }
 
@@ -42,6 +43,14 @@ export class CommandTrackerAddon {
    */
   onCommandExecuted (callback) {
     this._onCommandExecuted = callback
+  }
+
+  /**
+   * Register callback for when a command finishes (received via OSC 633;D).
+   * @param {function} callback - Called with (command: string, exitCode: number|null)
+   */
+  onCommandFinished (callback) {
+    this._onCommandFinished = callback
   }
 
   /**
@@ -104,6 +113,9 @@ export class CommandTrackerAddon {
           this.lastExitCode = parseInt(args, 10)
         } else {
           this.lastExitCode = null
+        }
+        if (this._onCommandFinished) {
+          this._onCommandFinished(this.executedCommand, this.lastExitCode)
         }
         return true
 

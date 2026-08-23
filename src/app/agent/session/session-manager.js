@@ -9,8 +9,13 @@ const { ProgressDetector } = require('./progress-detector')
 const { reduceSession, isTerminalStatus } = require('./state-machine')
 const { SCHEMA_VERSION, POLICY_VERSION, defaults } = require('../config')
 const { createRollbackIntent } = require('../verification/rollback-planner')
-const { routeFastQuery } = require('./fast-query-router')
-const { projectFastQueryResult } = require('../verification/result-projector')
+const { summarizeDirectLookup, objectiveKeywords } = require('../verification/direct-answer')
+const { evaluatePredicate } = require('../verification/verification-runner')
+const { StreamingSecretRedactor } = require('../observation/secret-redactor')
+const { ProviderSessionManager } = require('../providers/provider-session-manager')
+const { TaskLatencyRecorder } = require('../metrics/task-latency-recorder')
+const { ReadProbeBundleScheduler } = require('../execution/read-probe-bundle')
+const { ObservationSchema } = require('../schemas/observation-schema')
 
 function id (prefix) {
   return `${prefix}_${crypto.randomBytes(18).toString('base64url')}`
@@ -47,11 +52,19 @@ class AgentSessionManager {
     this.evidenceStore = options.evidenceStore
     this.bindingResolver = options.bindingResolver
     this.harnessFactory = options.harnessFactory
+    this.providerSessions = options.providerSessionManager || new ProviderSessionManager(this.harnessFactory)
     this.gateway = options.gateway
+    this.readProbeBundles = options.readProbeBundleScheduler || new ReadProbeBundleScheduler(this.gateway)
     this.observationPipeline = options.observationPipeline
     this.completionEvaluator = options.completionEvaluator
+    this.finalSynthesizer = options.finalSynthesizer
     this.verificationRunner = options.verificationRunner
-    this.featureFlags = options.featureFlags
+    this.skillRegistry = options.skillRegistry
+    this.knowledgeBase = options.knowledgeBase
+    this.featureFlags = options.featureFlags || {}
+    this.configRefreshPending = false
+    this.onRuntimeSettled = options.onRuntimeSettled || (() => {})
+    this.latencyRecorder = options.latencyRecorder || new TaskLatencyRecorder()
     this.policyVersion = options.policyVersion || POLICY_VERSION
     this.publish = options.publish || (() => {})
     this.sessions = new Map()
@@ -78,16 +91,22 @@ class AgentSessionManager {
       completedEffects: new Set(),
       progressDetector: new ProgressDetector(record.budget.maxEquivalentActionRepeats),
       lastProgress: null,
-      lastProgressEventAt: new Map()
+      lastProgressEventAt: new Map(),
+      lastKnowledgeFingerprint: '',
+      pendingVerificationFollowUps: new Map(),
+      pendingTerminalVerification: null
     }
     runtime.mailbox = new TaskMailbox(command => this.process(runtime, command))
     this.sessions.set(record.taskId, runtime)
+    if (!runtime.finished) this.latencyRecorder.start(record.taskId, record.createdAt, { adapter: record.harness?.adapter })
     return runtime
   }
 
   async start (request, ownerWindowId) {
+    const requestStartedAt = Date.now()
     const parsed = AgentStartRequestSchema.parse(request)
     if (!this.featureFlags.agentModeEnabled) throw agentError('AGENT_DISABLED', 'Agent 模式尚未启用。')
+    if (this.configRefreshPending) throw agentError('AGENT_CONFIG_REFRESH_PENDING', 'Agent 配置已保存，将在当前运行任务暂停或结束后生效。')
     if (containsSensitiveMaterial(parsed.prompt)) throw agentError('AGENT_SENSITIVE_INPUT_REJECTED', '问题中可能包含密码、令牌或私钥，请移除敏感值后重试。')
     const cached = this.clientRequests.get(`${ownerWindowId}:${parsed.clientRequestId}`)
     if (cached && Date.now() - cached.createdAt < 5 * 60 * 1000) return cached.response
@@ -120,18 +139,26 @@ class AgentSessionManager {
       budget: createBudget(),
       memory: createWorkingMemory(parsed.prompt, parent),
       evidenceRefs: parent?.evidenceRefs || [],
+      knowledgeCitations: parent?.knowledgeCitations || [],
       recentErrors: []
     })
     const runtime = this.attach(record)
-    this.commit(runtime, [{
-      type: 'session.created',
-      payload: {
-        status: record.status,
-        binding: this.toViewModel(record).binding,
-        budget: this.toViewModel(record).budget,
-        mode: record.mode
+    this.latencyRecorder.start(taskId, requestStartedAt, { adapter: record.harness.adapter })
+    this.commit(runtime, [
+      {
+        type: 'session.created',
+        payload: {
+          status: record.status,
+          binding: this.toViewModel(record).binding,
+          budget: this.toViewModel(record).budget,
+          mode: record.mode
+        }
+      },
+      {
+        type: 'session.accepted',
+        payload: { acceptedAt: now }
       }
-    }])
+    ])
     const response = {
       schemaVersion: 1,
       taskId,
@@ -139,6 +166,7 @@ class AgentSessionManager {
       snapshotVersion: runtime.record.snapshotVersion,
       eventCursor: runtime.record.lastEventSequence
     }
+    this.latencyRecorder.mark(taskId, 'submitAck')
     this.clientRequests.set(`${ownerWindowId}:${parsed.clientRequestId}`, { createdAt: Date.now(), response })
     runtime.mailbox.push({ type: 'OBJECTIVE_READY', effectId: id('effect') }).catch(error => this.failRuntime(runtime, error))
     return response
@@ -201,7 +229,7 @@ class AgentSessionManager {
       await runtime.mailbox.push({ type: 'CONTINUE_PLANNING', reason: statusReason('user_input_received', '已收到补充信息。', true), effectId: id('effect') })
     } else if (parsed.action === 'revise_approval') {
       const current = runtime.record.currentInvocation
-      if (runtime.record.status !== 'awaiting_approval' || current?.toolName !== 'shell.exec' || runtime.record.pendingApproval?.approvalRequestId !== parsed.approvalRequestId || current.intentDigest !== parsed.intentDigest) {
+      if (runtime.record.status !== 'awaiting_approval' || !['shell.exec', 'shell.review_exec'].includes(current?.toolName) || runtime.record.pendingApproval?.approvalRequestId !== parsed.approvalRequestId || current.intentDigest !== parsed.intentDigest) {
         throw agentError('AGENT_APPROVAL_STALE', '当前 Shell 审批已经失效或不可修改。')
       }
       this.gateway.supersedeApproval(runtime.record, parsed.approvalRequestId, parsed.intentDigest)
@@ -316,7 +344,11 @@ class AgentSessionManager {
     for (const effect of reduced.effects) {
       await this.runEffect(runtime, effect)
     }
-    if (isTerminalStatus(runtime.record.status)) await this.finishRuntime(runtime)
+    if (isTerminalStatus(runtime.record.status)) {
+      await this.finishRuntime(runtime)
+    } else if (runtime.record.status === 'paused') {
+      this.notifyRuntimeSettled()
+    }
     return runtime.record
   }
 
@@ -324,7 +356,7 @@ class AgentSessionManager {
     const events = draftEvents.map(draft => {
       runtime.record.lastEventSequence++
       return AgentEventSchema.parse({
-        schemaVersion: 1,
+        schemaVersion: 2,
         eventId: id('event'),
         taskId: runtime.record.taskId,
         sequence: runtime.record.lastEventSequence,
@@ -373,7 +405,23 @@ class AgentSessionManager {
       invocationId: intent.invocationId,
       message: String(value?.message || value || '执行中').slice(0, 500),
       bytesReceived: Number.isFinite(value?.bytesReceived) ? Math.max(0, Math.trunc(value.bytesReceived)) : undefined,
-      elapsedMs: Number.isFinite(value?.elapsedMs) ? Math.max(0, Math.trunc(value.elapsedMs)) : undefined
+      stdoutBytes: Number.isFinite(value?.stdoutBytes) ? Math.max(0, Math.trunc(value.stdoutBytes)) : undefined,
+      stderrBytes: Number.isFinite(value?.stderrBytes) ? Math.max(0, Math.trunc(value.stderrBytes)) : undefined,
+      elapsedMs: Number.isFinite(value?.elapsedMs) ? Math.max(0, Math.trunc(value.elapsedMs)) : undefined,
+      silentForMs: Number.isFinite(value?.silentForMs) ? Math.max(0, Math.trunc(value.silentForMs)) : undefined,
+      safeLastLine: value?.safeLastLine ? String(value.safeLastLine).slice(0, 512) : undefined,
+      truncated: value?.truncated === true,
+      source: value?.source || 'timer',
+      stream: value?.stream
+    }
+    if (payload.source === 'output') {
+      this.latencyRecorder.mark(runtime.record.taskId, 'executionFirstOutput')
+      if (this.featureFlags?.agentExecutionOutputProgressV2 === false) {
+        payload.source = 'adapter'
+        payload.message = payload.bytesReceived > 0 ? `已接收 ${payload.bytesReceived} 字节命令输出。` : '命令正在执行。'
+        delete payload.safeLastLine
+        delete payload.stream
+      }
     }
     this.enqueue(runtime, { type: 'EXECUTION_PROGRESS', invocationId: intent.invocationId, payload })
   }
@@ -391,55 +439,112 @@ class AgentSessionManager {
         return
       }
       runtime.record.budget = consumeTurn(runtime.record.budget)
+      this.latencyRecorder.incrementModelTurns(runtime.record.taskId)
       this.updateRuntime(runtime, [{ type: 'budget.updated', payload: this.toViewModel(runtime.record).budget }])
       runtime.abortController = new AbortController()
-      const fastQuery = !runtime.record.latestObservation && routeFastQuery(runtime.record)
-      if (fastQuery) {
-        this.enqueue(runtime, {
-          type: 'PLANNER_DECISION',
-          decision: fastQuery.decision,
-          requestId: id('input'),
-          userInputKind: 'text',
-          effectId: id('effect')
-        })
-        return
+      if (!runtime.harness) {
+        if (runtime.record.budget.usedReactSteps > 1) this.latencyRecorder.incrementRepeatedInitializations(runtime.record.taskId)
+        runtime.harness = await this.providerSessions.acquire(runtime.record)
+        const capabilities = runtime.harness.getCapabilities()
+        const metadata = runtime.harness.metadata
+        this.updateRuntime(runtime, [{
+          type: 'provider.session_started',
+          payload: {
+            sessionId: metadata.sessionId,
+            adapter: runtime.record.harness.adapter,
+            providerId: runtime.record.harness.providerId,
+            modelId: runtime.record.harness.modelId,
+            capabilitySnapshotId: metadata.capabilitySnapshotId,
+            streaming: capabilities.streaming === true,
+            structuredOutput: capabilities.structuredOutput === true
+          }
+        }])
       }
-      runtime.harness = runtime.harness || await this.harnessFactory.create(runtime.record)
       let decision
       const preparedContext = this.toTurnInput(runtime.record)
+      const knowledgeFingerprint = preparedContext.input.knowledge.map(item => `${item.chunkId}@${item.sourceVersion}`).join(':')
+      if (knowledgeFingerprint && knowledgeFingerprint !== runtime.lastKnowledgeFingerprint) {
+        runtime.lastKnowledgeFingerprint = knowledgeFingerprint
+        const retrievedCitations = preparedContext.input.knowledge.map(toKnowledgeCitation)
+        runtime.record.knowledgeCitations = mergeKnowledgeCitations(
+          this.knowledgeBase?.annotateCitations([...(runtime.record.knowledgeCitations || []), ...retrievedCitations]) || retrievedCitations
+        )
+        this.updateRuntime(runtime, [{
+          type: 'knowledge.retrieved',
+          payload: {
+            count: preparedContext.input.knowledge.length,
+            citations: retrievedCitations
+          }
+        }])
+      }
       if (preparedContext.exhausted) {
         this.enqueue(runtime, { type: 'INCONCLUSIVE', reason: statusReason('context_exhausted', '上下文预算不足，已停止继续探查。', false), finalResult: inconclusiveResult(runtime.record, 'context_exhausted'), effectId: id('effect') })
         return
       }
-      for await (const event of runtime.harness.runTurn(preparedContext.input, runtime.abortController.signal)) {
-        if (event.type === 'status' && !isTerminalStatus(runtime.record.status)) {
-          runtime.record.harnessActivity = {
-            phase: event.phase,
-            message: event.message,
-            updatedAt: new Date().toISOString()
+      const providerDraft = createProviderDraft()
+      let providerFailure
+      try {
+        for await (const event of runtime.harness.runTurn(preparedContext.input, runtime.abortController.signal)) {
+          if ((event.type === 'status' || event.type === 'phase') && !isTerminalStatus(runtime.record.status)) {
+            this.latencyRecorder.mark(runtime.record.taskId, 'firstLifecycle')
+            this.latencyRecorder.mark(runtime.record.taskId, 'firstStatus')
+            runtime.record.harnessActivity = {
+              phase: normalizeProviderPhase(event.phase),
+              message: String(event.safeMessage || event.message || 'AI 正在处理请求。').slice(0, 200),
+              updatedAt: new Date().toISOString()
+            }
+            this.updateRuntime(runtime, [
+              { type: 'harness.progress', payload: runtime.record.harnessActivity },
+              { type: 'provider.phase', payload: { ...runtime.record.harnessActivity, code: event.code } }
+            ])
           }
-          this.updateRuntime(runtime, [{
-            type: 'harness.progress',
-            payload: runtime.record.harnessActivity
-          }])
-        }
-        if (event.type === 'provider_warning' && !isTerminalStatus(runtime.record.status)) {
-          runtime.record.harnessActivity = {
-            phase: 'responding',
-            message: String(event.message || '模型输出正在安全降级处理。').slice(0, 200),
-            updatedAt: new Date().toISOString()
+          if (event.type === 'provider_warning' && !isTerminalStatus(runtime.record.status)) {
+            runtime.record.harnessActivity = {
+              phase: 'responding',
+              message: String(event.safeMessage || event.message || '模型输出正在安全降级处理。').slice(0, 200),
+              updatedAt: new Date().toISOString()
+            }
+            this.updateRuntime(runtime, [{
+              type: 'harness.progress',
+              payload: runtime.record.harnessActivity
+            }])
           }
-          this.updateRuntime(runtime, [{
-            type: 'harness.progress',
-            payload: runtime.record.harnessActivity
-          }])
+          if (event.type === 'text.delta') {
+            this.latencyRecorder.mark(runtime.record.taskId, 'providerTtft')
+            this.latencyRecorder.mark(runtime.record.taskId, 'firstModelResponse')
+            this.consumeProviderText(runtime, providerDraft, event.delta)
+          }
+          if (event.type === 'decision' || event.type === 'decision.completed') {
+            this.latencyRecorder.mark(runtime.record.taskId, 'firstModelResponse')
+            decision = event.decision
+          }
+          if (event.type === 'usage') {
+            const inputTokens = nonnegativeInteger(event.inputTokens)
+            const outputTokens = nonnegativeInteger(event.outputTokens)
+            runtime.record.budget.modelInputTokens = (runtime.record.budget.modelInputTokens || 0) + inputTokens
+            runtime.record.budget.modelOutputTokens = (runtime.record.budget.modelOutputTokens || 0) + outputTokens
+            this.latencyRecorder.addUsage(runtime.record.taskId, inputTokens, outputTokens)
+            this.updateRuntime(runtime, [{
+              type: 'usage.updated',
+              payload: {
+                inputTokens: runtime.record.budget.modelInputTokens,
+                outputTokens: runtime.record.budget.modelOutputTokens,
+                cachedTokens: nonnegativeInteger(event.cachedTokens)
+              }
+            }])
+          }
+          if (event.type === 'error') throw providerEventError(event.error)
         }
-        if (event.type === 'decision') decision = event.decision
-        if (event.type === 'usage') {
-          runtime.record.budget.modelInputTokens = (runtime.record.budget.modelInputTokens || 0) + event.inputTokens
-          runtime.record.budget.modelOutputTokens = (runtime.record.budget.modelOutputTokens || 0) + event.outputTokens
-        }
+      } catch (error) {
+        providerFailure = error
+      } finally {
+        this.completeProviderText(runtime, providerDraft, providerFailure ? 'interrupted' : 'completed')
       }
+      if (this.featureFlags.agentPersistentProviderSessionV2 === false) {
+        await this.providerSessions.close(runtime.record.taskId, providerFailure ? 'failed' : 'completed')
+        runtime.harness = null
+      }
+      if (providerFailure) throw providerFailure
       if (!decision) throw agentError('AGENT_INVALID_MODEL_OUTPUT', '模型未返回有效的结构化决策。')
       decision = sanitizeDecision(runtime.record, PlannerDecisionSchema.parse(decision))
       const sensitiveQuestion = decision.goalStatus === 'need_user' && looksSensitiveInput(decision.userQuestion)
@@ -453,6 +558,21 @@ class AgentSessionManager {
             ...decision.action,
             taskId: runtime.record.taskId,
             invocationId: id('invocation')
+          }
+        : undefined
+      decision.readProbeBundle = decision.readProbeBundle
+        ? {
+            ...decision.readProbeBundle,
+            bundleId: id('bundle'),
+            actions: decision.readProbeBundle.actions.map(item => ({
+              ...item,
+              dependsOn: [],
+              intent: {
+                ...item.intent,
+                taskId: runtime.record.taskId,
+                invocationId: id('invocation')
+              }
+            }))
           }
         : undefined
       this.enqueue(runtime, {
@@ -480,7 +600,7 @@ class AgentSessionManager {
       if (runtime.record.budget.usedAutoReadActions !== beforeAutoReads) {
         this.updateRuntime(runtime, [{ type: 'budget.updated', payload: this.toViewModel(runtime.record).budget }])
       }
-      if (prepared.mutability !== 'none' && prepared.decision.outcome !== 'deny' && prepared.intent.verificationPlan?.preconditions.length) {
+      if (prepared.intent.toolName !== 'shell.exec' && prepared.mutability !== 'none' && prepared.decision.outcome !== 'deny' && prepared.intent.verificationPlan?.preconditions.length) {
         const beforeVerificationReads = runtime.record.budget.usedAutoReadActions
         this.updateRuntime(runtime, [{
           type: 'verification.started',
@@ -513,14 +633,101 @@ class AgentSessionManager {
       this.enqueue(runtime, { type: 'POLICY_DECIDED', ...prepared, effectId: id('effect') })
       return
     }
+    if (effect.type === 'EVALUATE_READ_BUNDLE') {
+      if (this.featureFlags.agentReadProbeBundleV2 === false) {
+        const prepared = await this.gateway.prepare(runtime.record, effect.bundle.actions[0].intent)
+        this.enqueue(runtime, { type: 'POLICY_DECIDED', ...prepared, effectId: id('effect') })
+        return
+      }
+      const beforeAutoReads = runtime.record.budget.usedAutoReadActions
+      const preparedBundle = await this.readProbeBundles.prepare(runtime.record, effect.bundle)
+      if (runtime.record.budget.usedAutoReadActions !== beforeAutoReads) {
+        this.updateRuntime(runtime, [{ type: 'budget.updated', payload: this.toViewModel(runtime.record).budget }])
+      }
+      if (preparedBundle.mode === 'serial') {
+        const candidate = [...preparedBundle.prepared].reverse().find(item => item.prepared)?.prepared
+        if (candidate) {
+          this.enqueue(runtime, { type: 'POLICY_DECIDED', ...candidate, effectId: id('effect') })
+          return
+        }
+        const unsafe = preparedBundle.prepared.find(item => item.reasons?.length)?.action?.intent || preparedBundle.bundle.actions[0].intent
+        const prepared = await this.gateway.prepare(runtime.record, unsafe)
+        this.enqueue(runtime, { type: 'POLICY_DECIDED', ...prepared, effectId: id('effect') })
+        return
+      }
+      this.enqueue(runtime, { type: 'BUNDLE_POLICY_DECIDED', preparedBundle, effectId: id('effect') })
+      return
+    }
     if (effect.type === 'EXECUTE_INTENT') {
+      this.latencyRecorder.incrementToolInvocations(runtime.record.taskId)
       const executed = await this.gateway.execute(runtime.record, effect.intent, effect.capability, runtime.abortController?.signal, effect.timeoutMs)
+      this.latencyRecorder.mark(runtime.record.taskId, 'firstExecutionResult')
       this.enqueue(runtime, { type: 'EXECUTION_FINISHED', result: executed.result, streams: executed.streams, effectId: id('effect') })
       return
     }
+    if (effect.type === 'EXECUTE_READ_BUNDLE') {
+      this.latencyRecorder.incrementToolInvocations(runtime.record.taskId, effect.preparedBundle.prepared.length)
+      const execution = await this.readProbeBundles.executePrepared(runtime.record, effect.preparedBundle, runtime.abortController?.signal)
+      this.latencyRecorder.mark(runtime.record.taskId, 'firstExecutionResult')
+      this.enqueue(runtime, { type: 'BUNDLE_EXECUTION_FINISHED', execution, effectId: id('effect') })
+      return
+    }
     if (effect.type === 'BUILD_OBSERVATION') {
-      const observation = await this.observationPipeline.process(runtime.record, effect.result, effect.streams)
+      const observation = await this.observationPipeline.process(runtime.record, effect.result, effect.streams, runtime.abortController?.signal)
+      const followUp = runtime.pendingVerificationFollowUps.get(effect.result.invocationId)
+      if (followUp) {
+        runtime.pendingVerificationFollowUps.delete(effect.result.invocationId)
+        const passed = effect.result.status === 'success' && evaluatePredicate(followUp.check.predicate, observation, effect.streams)
+        const checkStatus = passed ? 'passed' : effect.result.status === 'success' ? 'failed' : 'inconclusive'
+        const checkResult = {
+          checkId: followUp.check.checkId,
+          status: checkStatus,
+          actualSummary: observation.summary,
+          evidenceRefs: observation.evidenceRefs
+        }
+        const checkResults = [...(followUp.obligation.checkResults || []), checkResult]
+        const evidenceRefs = [...new Set([...(followUp.obligation.evidenceRefs || []), ...observation.evidenceRefs])]
+        const remainingChecks = followUp.obligation.verificationPlan.postconditions.slice(1)
+        const status = checkResults.some(item => item.status === 'failed')
+          ? 'failed'
+          : checkResults.some(item => item.status === 'inconclusive')
+            ? 'inconclusive'
+            : remainingChecks.length ? 'partial' : 'passed'
+        const outcome = {
+          planId: followUp.obligation.verificationPlan.planId,
+          status,
+          checkResults,
+          evidenceRefs,
+          verifiedAt: new Date().toISOString()
+        }
+        runtime.record = remainingChecks.length
+          ? recordWithPendingVerification(runtime.record, followUp.obligation, remainingChecks, checkResults, evidenceRefs, outcome)
+          : recordWithVerification(runtime.record, followUp.obligation.invocationId, outcome)
+        if (!remainingChecks.length && outcome.status !== 'passed') {
+          runtime.pendingTerminalVerification = { obligation: followUp.obligation, outcome }
+        }
+        this.updateRuntime(runtime, [{
+          type: 'verification.finished',
+          correlationId: effect.result.invocationId,
+          payload: { ...outcome, phase: 'postcheck' }
+        }])
+      }
       this.enqueue(runtime, { type: 'OBSERVATION_READY', observation, effectId: id('effect') })
+      return
+    }
+    if (effect.type === 'BUILD_BUNDLE_OBSERVATIONS') {
+      const observations = []
+      const invocations = []
+      for (const item of effect.execution.results) {
+        const invocation = bundleInvocation(item.intent)
+        invocations.push(invocation)
+        runtime.record.currentInvocation = invocation
+        const observation = item.result
+          ? await this.observationPipeline.process(runtime.record, item.result, item.streams, runtime.abortController?.signal)
+          : bundleFailureObservation(item)
+        observations.push(observation)
+      }
+      this.enqueue(runtime, { type: 'BUNDLE_OBSERVATIONS_READY', observations, invocations, effectId: id('effect') })
       return
     }
     if (effect.type === 'REDUCE_CONTEXT') {
@@ -559,37 +766,59 @@ class AgentSessionManager {
       this.enqueue(runtime, { type: 'CONTEXT_REDUCED', memory, effectId: id('effect') })
       return
     }
+    if (effect.type === 'REDUCE_BUNDLE_CONTEXT') {
+      let memory = runtime.record.memory
+      for (const [index, observation] of effect.observations.entries()) {
+        const invocation = effect.invocations[index]
+        memory = reconcileObservation(memory, observation)
+        runtime.record.currentInvocation = invocation
+        runtime.record.latestObservation = observation
+        runtime.record.recentErrors = [...runtime.record.recentErrors, ...observation.errors].slice(-20)
+        runtime.record.budget = recordResult(runtime.record.budget, {
+          error: observation.status !== 'success',
+          capturedBytes: observation.sample.reduce((sum, item) => sum + Buffer.byteLength(item.text, 'utf8'), 0)
+        })
+        runtime.lastProgress = runtime.progressDetector.record(memory, invocation, observation.errors[0]?.category)
+        runtime.record.evidenceRefs = [...new Set([...runtime.record.evidenceRefs, ...observation.evidenceRefs])]
+      }
+      this.updateRuntime(runtime, [{ type: 'budget.updated', payload: this.toViewModel(runtime.record).budget }])
+      this.enqueue(runtime, { type: 'CONTEXT_REDUCED', memory, effectId: id('effect') })
+      return
+    }
     if (effect.type === 'EVALUATE_PROGRESS') {
+      if (runtime.pendingTerminalVerification) {
+        const { obligation, outcome } = runtime.pendingTerminalVerification
+        runtime.pendingTerminalVerification = null
+        const finalResult = mutationVerificationResult(runtime.record, outcome, createRollbackIntent(runtime.record, obligation.verificationPlan))
+        this.enqueue(runtime, {
+          type: outcome.status === 'failed' ? 'FAIL' : 'INCONCLUSIVE',
+          reason: statusReason('mutation_verification_failed', outcome.status === 'failed' ? '操作已执行，但结果检查未通过。' : '操作已执行，但结果检查未能完成。', false),
+          ...(outcome.status === 'failed' ? { payload: finalResult } : { finalResult }),
+          effectId: id('effect')
+        })
+        return
+      }
       const obligation = runtime.record.memory.verificationObligations[0]
       if (obligation) {
-        this.enqueue(runtime, {
-          type: 'VERIFY_MUTATION',
+        const followUp = buildVerificationFollowUp(this.gateway, runtime.record, obligation)
+        if (!followUp) {
+          this.enqueue(runtime, { type: 'CONTINUE_PLANNING', effectId: id('effect') })
+          return
+        }
+        runtime.pendingVerificationFollowUps.set(followUp.intent.invocationId, {
           obligation,
-          reason: statusReason('mutation_postcheck', '正在验证变更后的实际状态。', true),
-          payload: { planId: obligation.verificationPlan.planId, phase: 'postcheck', invocationId: obligation.invocationId },
+          check: followUp.check
+        })
+        this.enqueue(runtime, {
+          type: 'FOLLOW_UP_PROPOSED',
+          intent: followUp.intent,
+          reason: statusReason('verification_confirmation_required', '已完成当前命令；下面是可选的结果验证，执行前仍需你的确认。', true),
           effectId: id('effect')
         })
         return
       }
       if (runtime.lastProgress?.blocked) {
         this.enqueue(runtime, { type: 'INCONCLUSIVE', reason: statusReason('no_progress_loop', '重复动作没有产生新事实，已停止自动循环。', false), finalResult: inconclusiveResult(runtime.record, 'no_progress_loop'), effectId: id('effect') })
-        return
-      }
-      const fastQuery = routeFastQuery(runtime.record)
-      const projected = fastQuery && projectFastQueryResult(runtime.record, fastQuery.route, runtime.record.latestObservation)
-      if (projected) {
-        const evidenceRefs = runtime.record.latestObservation.evidenceRefs
-        runtime.record.memory = {
-          ...runtime.record.memory,
-          missingInformation: [],
-          completionCriteria: runtime.record.memory.completionCriteria.map(item => ({ ...item, status: 'passed', evidenceRefs }))
-        }
-        this.enqueue(runtime, {
-          type: 'COMPLETE',
-          reason: statusReason('structured_query_complete', '结构化只读查询已由执行证据完整回答。', false),
-          finalResult: projected,
-          effectId: id('effect')
-        })
         return
       }
       const allowed = checkBudget(runtime.record.budget)
@@ -622,7 +851,19 @@ class AgentSessionManager {
       return
     }
     if (effect.type === 'VERIFY_COMPLETION') {
-      const outcome = await this.completionEvaluator.evaluate(runtime.record)
+      const decision = await this.completionEvaluator.evaluate(runtime.record)
+      const outcome = completionOutcome(runtime.record, decision)
+      if (this.finalSynthesizer && this.featureFlags.agentGroundedSynthesisEnabled) {
+        try {
+          const synthesis = await this.finalSynthesizer.synthesize(runtime.record, outcome, runtime.abortController?.signal)
+          this.latencyRecorder.mark(runtime.record.taskId, 'finalSynthesis')
+          outcome.finalResult = synthesis.finalResult
+          this.publishAssistantResponse(runtime, synthesis.responseText, synthesis.synthesized)
+        } catch (_) {
+          this.latencyRecorder.mark(runtime.record.taskId, 'finalSynthesis')
+          this.publishAssistantResponse(runtime, outcome.finalResult.conclusion, false)
+        }
+      }
       const type = outcome.status === 'complete' ? 'COMPLETE' : outcome.status === 'blocked' ? 'BLOCK' : outcome.status === 'failed' ? 'FAIL' : 'INCONCLUSIVE'
       this.enqueue(runtime, { type, reason: outcome.reason, finalResult: outcome.finalResult, payload: { finalResult: outcome.finalResult }, effectId: id('effect') })
     }
@@ -630,6 +871,86 @@ class AgentSessionManager {
 
   enqueue (runtime, command) {
     runtime.mailbox.push(command).catch(error => this.failRuntime(runtime, error))
+  }
+
+  publishAssistantResponse (runtime, text, synthesized) {
+    const value = String(text || '').trim().slice(0, 5000)
+    if (!value) return
+    const responseId = id('response')
+    const chunks = chunkText(value, 180)
+    runtime.record.assistantResponse = {
+      responseId,
+      text: value,
+      status: 'completed',
+      updatedAt: new Date().toISOString()
+    }
+    runtime.record.snapshotVersion++
+    runtime.record.updatedAt = new Date().toISOString()
+    this.commit(runtime, [
+      ...chunks.map((delta, index) => ({
+        type: 'assistant.delta',
+        correlationId: responseId,
+        payload: { responseId, sequence: index + 1, delta }
+      })),
+      {
+        type: 'assistant.completed',
+        correlationId: responseId,
+        payload: { responseId, text: value, synthesized: synthesized === true }
+      }
+    ])
+  }
+
+  consumeProviderText (runtime, draft, value) {
+    const redacted = draft.redactor.push(value)
+    if (redacted.failed || !redacted.text) return
+    const remaining = 5000 - draft.text.length - draft.pending.length
+    if (remaining <= 0) return
+    draft.pending += redacted.text.slice(0, remaining)
+    if (Date.now() - draft.lastPublishedAt >= 50) this.flushProviderText(runtime, draft)
+  }
+
+  flushProviderText (runtime, draft) {
+    if (!draft.pending || isTerminalStatus(runtime.record.status)) return
+    const delta = draft.pending
+    draft.pending = ''
+    draft.text += delta
+    draft.lastPublishedAt = Date.now()
+    runtime.record.assistantResponse = {
+      responseId: draft.responseId,
+      text: draft.text,
+      status: 'streaming',
+      updatedAt: new Date().toISOString()
+    }
+    this.updateRuntime(runtime, [{
+      type: 'assistant.delta',
+      correlationId: draft.responseId,
+      payload: { responseId: draft.responseId, sequence: ++draft.sequence, delta }
+    }])
+  }
+
+  completeProviderText (runtime, draft, status) {
+    const redacted = draft.redactor.flush()
+    if (!redacted.failed && redacted.text) {
+      const remaining = 5000 - draft.text.length - draft.pending.length
+      if (remaining > 0) draft.pending += redacted.text.slice(0, remaining)
+    }
+    this.flushProviderText(runtime, draft)
+    if (!draft.text || isTerminalStatus(runtime.record.status)) return
+    runtime.record.assistantResponse = {
+      responseId: draft.responseId,
+      text: draft.text,
+      status,
+      updatedAt: new Date().toISOString()
+    }
+    if (status === 'completed') {
+      this.updateRuntime(runtime, [{
+        type: 'assistant.completed',
+        correlationId: draft.responseId,
+        payload: { responseId: draft.responseId, text: draft.text, synthesized: false }
+      }])
+    } else {
+      this.updateRuntime(runtime, [])
+    }
   }
 
   preemptActive (runtime, reason) {
@@ -660,7 +981,26 @@ class AgentSessionManager {
     runtime.abortController = null
     runtime.cancelAfterSafePoint = null
     runtime.pauseAfterSafePoint = null
-    try { await harness?.dispose() } catch (_) {}
+    try { await this.providerSessions.close(runtime.record.taskId, providerCloseReason(runtime.record.status)) } catch (_) {}
+    try { await harness?.dispose?.() } catch (_) {}
+    this.latencyRecorder.setEvidenceCounts(runtime.record.taskId, runtime.record.evidenceRefs.length, citedEvidenceCount(runtime.record))
+    this.latencyRecorder.setVerificationCount(runtime.record.taskId, runtime.record.verification?.outcomes?.length || 0)
+    this.latencyRecorder.finish(runtime.record.taskId, runtime.record.status)
+    this.notifyRuntimeSettled()
+  }
+
+  notifyRuntimeSettled () {
+    try { this.onRuntimeSettled() } catch (_) {}
+  }
+
+  async dispose () {
+    for (const runtime of this.sessions.values()) {
+      if (runtime.approvalTimer) clearTimeout(runtime.approvalTimer)
+      runtime.approvalTimer = null
+      this.preemptActive(runtime, 'shutdown')
+      this.revokeRuntimeResources(runtime)
+    }
+    await this.providerSessions.dispose()
   }
 
   async failRuntime (runtime, error) {
@@ -676,6 +1016,11 @@ class AgentSessionManager {
   }
 
   toTurnInput (record) {
+    const skillCandidates = this.featureFlags.agentSkillsEnabled ? this.skillRegistry?.routeMetadata(record.prompt, 8) || [] : []
+    const skills = this.skillRegistry?.loadSelected(skillCandidates.map(item => item.id), { limit: 2, tokenBudget: 3000 }) || []
+    const knowledge = this.featureFlags.agentKnowledgeEnabled
+      ? this.knowledgeBase?.search(`${record.prompt}\n${record.memory.missingInformation.join('\n')}`, 6) || []
+      : []
     const input = {
       schemaVersion: 1,
       taskId: record.taskId,
@@ -697,6 +1042,8 @@ class AgentSessionManager {
         latestError: record.recentErrors[record.recentErrors.length - 1],
         adaptationHints: record.latestObservation?.adaptationHints
       }),
+      skills,
+      knowledge,
       latestObservation: record.latestObservation
     }
     const prepared = prepareTurnInput(input, record.harness.maxContextTokens)
@@ -705,6 +1052,7 @@ class AgentSessionManager {
 
   toViewModel (record) {
     const now = Date.now()
+    const knowledgeCitations = this.knowledgeBase?.annotateCitations(record.knowledgeCitations || []) || record.knowledgeCitations || []
     return {
       schemaVersion: 1,
       taskId: record.taskId,
@@ -739,6 +1087,7 @@ class AgentSessionManager {
           }
         : undefined,
       activity: record.harnessActivity,
+      assistantResponse: record.assistantResponse,
       timeline: [],
       pendingApproval: record.pendingApproval
         ? {
@@ -748,7 +1097,11 @@ class AgentSessionManager {
           }
         : undefined,
       pendingUserInput: record.pendingUserInput,
-      finalResult: record.finalResult,
+      latestObservation: record.latestObservation,
+      finalResult: record.finalResult
+        ? { ...record.finalResult, knowledgeCitations: this.knowledgeBase?.annotateCitations(record.finalResult.knowledgeCitations || knowledgeCitations) || record.finalResult.knowledgeCitations || knowledgeCitations }
+        : undefined,
+      knowledgeCitations,
       evidenceRefs: record.evidenceRefs,
       availableControls: controlsFor(record.status)
     }
@@ -779,19 +1132,37 @@ function baseResult (record, status, conclusion) {
     operations: record.memory.changeRecords,
     verificationOutcomes: record.verification?.outcomes || [],
     evidenceRefs: record.evidenceRefs,
+    knowledgeCitations: record.knowledgeCitations || [],
+    ...(record.latestObservation?.terminalTranscript
+      ? { terminalTranscript: { invocationId: record.latestObservation.invocationId, ...record.latestObservation.terminalTranscript } }
+      : {}),
     completedAt: new Date().toISOString()
   }
 }
 
 function sanitizeDecision (record, decision) {
-  const factIds = new Set(record.memory.facts.map(fact => fact.factId))
+  const factsById = new Map(record.memory.facts.map(fact => [fact.factId, fact]))
+  const factIds = new Set(factsById.keys())
   const evidenceRefs = new Set(record.evidenceRefs)
+  const knownFactIds = decision.knownFactIds.filter(factId => factIds.has(factId))
+  const completionEvidenceRefs = [...new Set(knownFactIds.flatMap(factId => factsById.get(factId)?.evidenceRefs || []))]
+    .filter(ref => evidenceRefs.has(ref))
+  const canConfirmCompletion = decision.goalStatus === 'complete' &&
+    decision.missingInformation.length === 0 &&
+    knownFactIds.length > 0 &&
+    completionEvidenceRefs.length > 0
   return {
     ...decision,
-    knownFactIds: decision.knownFactIds.filter(factId => factIds.has(factId)),
+    knownFactIds,
     completionCriteria: decision.completionCriteria.map(criterion => {
-      const validRefs = criterion.evidenceRefs.filter(ref => evidenceRefs.has(ref))
-      const status = criterion.status === 'passed' && !validRefs.length ? 'inconclusive' : criterion.status
+      let validRefs = criterion.evidenceRefs.filter(ref => evidenceRefs.has(ref))
+      let status = criterion.status
+      if (canConfirmCompletion && status !== 'passed' && !validRefs.length) {
+        status = 'passed'
+        validRefs = completionEvidenceRefs
+      } else if (status === 'passed' && !validRefs.length) {
+        status = 'inconclusive'
+      }
       return { ...criterion, status, evidenceRefs: validRefs }
     })
   }
@@ -817,7 +1188,7 @@ function mutationVerificationResult (record, outcome, rollbackIntent) {
   return {
     ...baseResult(record, status, outcome.status === 'failed'
       ? '变更已执行，但只读后置验证失败，不能确认目标状态。'
-      : '变更已执行，但后置验证证据不足，远端状态仍需确认。'),
+      : '变更已执行，但后置结果检查未能完成，远端状态仍需确认。'),
     nextSuggestedProbe: rollbackIntent
       ? {
           toolName: rollbackIntent.toolName,
@@ -830,7 +1201,23 @@ function mutationVerificationResult (record, outcome, rollbackIntent) {
 }
 
 function cancelledResult (record) { return baseResult(record, 'cancelled', '任务已由用户中断。') }
-function inconclusiveResult (record, code) { return baseResult(record, 'inconclusive', `现有证据不足以形成可靠结论（${code}）。`) }
+
+function citedEvidenceCount (record) {
+  const cited = new Set()
+  for (const fact of record.finalResult?.confirmedFacts || []) {
+    for (const ref of fact.evidenceRefs || []) cited.add(ref)
+  }
+  for (const outcome of record.finalResult?.verificationOutcomes || []) {
+    for (const ref of outcome.evidenceRefs || []) cited.add(ref)
+  }
+  return cited.size
+}
+function inconclusiveResult (record, code) {
+  const message = code === 'react_steps_exhausted'
+    ? 'AI 未能在本轮生成有效的下一步，任务已停止，未继续执行命令。'
+    : 'AI 未能完成当前请求，任务已停止，未继续执行命令。'
+  return baseResult(record, 'inconclusive', message)
+}
 function needUserResult (record, decision) {
   const question = String(decision.userQuestion || '').trim()
   const reason = String(decision.reasonSummary || '').trim()
@@ -840,6 +1227,105 @@ function needUserResult (record, decision) {
   }
 }
 function failedResult (record, error) { return baseResult(record, 'failed', error.safeMessage || '任务执行失败。') }
+
+function completionOutcome (record, decision) {
+  const knownEvidenceRefs = new Set(record.evidenceRefs)
+  const directAnswer = summarizeDirectLookup(
+    record.memory.facts.filter(fact => fact.evidenceRefs?.some(ref => knownEvidenceRefs.has(ref))),
+    record.prompt
+  )
+  const status = directAnswer ? 'complete' : decision.status === 'satisfied' ? 'complete' : decision.status
+  const effectiveDecision = directAnswer
+    ? { ...decision, status: 'satisfied', unresolved: [], warnings: [] }
+    : decision
+  const conclusion = status === 'complete'
+    ? directAnswer || summarizeVerifiedFacts(record.memory.facts, record.prompt)
+    : decision.warnings[0] || 'AI 尚未完成全部关键目标，本轮已停止。'
+  return {
+    status,
+    decision: effectiveDecision,
+    reason: status === 'complete'
+      ? undefined
+      : statusReason(status === 'failed' ? 'unverified_change' : 'insufficient_evidence', conclusion, status !== 'failed'),
+    finalResult: {
+      ...baseResult(record, status, conclusion),
+      unresolvedItems: effectiveDecision.unresolved
+    }
+  }
+}
+
+function summarizeVerifiedFacts (facts, objective = '') {
+  const verified = facts.filter(item => item.confidence !== 'inferred')
+  const directAnswer = summarizeDirectLookup(verified, objective)
+  if (directAnswer) return directAnswer
+  const keywords = objectiveKeywords(objective)
+  const relevant = keywords.length
+    ? verified.filter(item => keywords.some(keyword => String(item.statement || '').toLowerCase().includes(keyword)))
+    : verified
+  const value = (relevant.length ? relevant : verified).slice(0, 2).map(item => item.statement).join('；')
+  return value.slice(0, 5000) || '已完成当前目标的证据检查。'
+}
+
+function toKnowledgeCitation (item) {
+  return {
+    sourceId: item.sourceId,
+    sourcePath: item.sourcePath,
+    sourceVersion: item.sourceVersion,
+    chunkId: item.chunkId,
+    startLine: item.startLine,
+    endLine: item.endLine,
+    score: item.score,
+    retrievedAt: item.retrievedAt,
+    retrievalMode: item.retrievalMode || 'fts',
+    stale: item.stale === true
+  }
+}
+
+function mergeKnowledgeCitations (citations) {
+  const byChunk = new Map()
+  for (const citation of citations) byChunk.set(`${citation.sourceId}:${citation.chunkId}:${citation.sourceVersion}`, citation)
+  return [...byChunk.values()].slice(-100)
+}
+
+function buildVerificationFollowUp (gateway, record, obligation) {
+  const check = obligation?.verificationPlan?.postconditions?.[0]
+  if (!check?.intent) return null
+  const descriptor = gateway.publicTools().find(tool => tool.name === check.intent.toolName)
+  if (!descriptor) return null
+  return {
+    check,
+    intent: {
+      schemaVersion: 1,
+      taskId: record.taskId,
+      invocationId: id('invocation'),
+      toolName: descriptor.name,
+      toolVersion: descriptor.version,
+      arguments: check.intent.arguments,
+      target: check.intent.target,
+      purpose: check.intent.purpose || check.description,
+      expectedObservation: check.description
+    }
+  }
+}
+
+function recordWithPendingVerification (record, obligation, remainingChecks, checkResults, evidenceRefs, outcome) {
+  return {
+    ...record,
+    memory: {
+      ...record.memory,
+      verificationObligations: record.memory.verificationObligations.map(item => item.invocationId === obligation.invocationId
+        ? {
+            ...item,
+            verificationPlan: { ...item.verificationPlan, postconditions: remainingChecks },
+            checkResults,
+            evidenceRefs
+          }
+        : item)
+    },
+    verification: { outcomes: [...(record.verification?.outcomes || []), outcome].slice(-100) },
+    evidenceRefs: [...new Set([...record.evidenceRefs, ...evidenceRefs])]
+  }
+}
 
 function safeError (error) {
   return {
@@ -852,6 +1338,48 @@ function safeError (error) {
     safeDetails: error.safeDetails && Object.keys(error.safeDetails).length ? error.safeDetails : undefined,
     occurredAt: new Date().toISOString()
   }
+}
+
+function bundleInvocation (intent) {
+  return {
+    invocationId: intent.invocationId,
+    intentDigest: intent.intentDigest,
+    toolName: intent.toolName,
+    toolVersion: intent.toolVersion,
+    mutability: 'none',
+    phase: 'finished',
+    target: intent.target,
+    purpose: intent.purpose,
+    expectedObservation: intent.expectedObservation,
+    normalizedArguments: intent.normalizedArguments
+  }
+}
+
+function bundleFailureObservation (item) {
+  const error = safeError({
+    code: item.error?.code || 'AGENT_BUNDLE_ACTION_FAILED',
+    category: item.notStarted ? 'cancelled' : 'internal_error',
+    source: 'gateway',
+    retryable: !item.notStarted,
+    safeMessage: item.error?.safeMessage || '并行只读探查未能返回结果。'
+  })
+  return ObservationSchema.parse({
+    schemaVersion: 1,
+    observationId: id('observation'),
+    invocationId: item.intent.invocationId,
+    status: item.notStarted ? 'cancelled' : 'error',
+    exitCode: null,
+    summary: error.safeMessage,
+    facts: [],
+    factCandidates: [],
+    errors: [error],
+    sample: [],
+    truncated: false,
+    omittedBytes: 0,
+    untrustedContent: true,
+    evidenceRefs: [],
+    adaptationHints: []
+  })
 }
 
 function agentError (code, safeMessage) {
@@ -869,4 +1397,58 @@ function containsSensitiveMaterial (value) {
   return /(?:BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY|(?:password|passwd|api[_ -]?key|access[_ -]?token|secret)\s*[:=]\s*\S+|(?:bearer|basic)\s+[A-Za-z0-9._~+/-]{8,})/i.test(String(value || ''))
 }
 
-module.exports = { AgentSessionManager, TaskMailbox, id, sameBinding, statusReason, safeError, looksSensitiveInput, containsSensitiveMaterial, mutationVerificationResult }
+function chunkText (value, maxLength) {
+  const chunks = []
+  let remaining = String(value || '')
+  while (remaining) {
+    if (remaining.length <= maxLength) {
+      chunks.push(remaining)
+      break
+    }
+    let boundary = remaining.lastIndexOf(' ', maxLength)
+    if (boundary < Math.floor(maxLength / 2)) boundary = maxLength
+    chunks.push(remaining.slice(0, boundary))
+    remaining = remaining.slice(boundary)
+  }
+  return chunks
+}
+
+function createProviderDraft () {
+  return {
+    responseId: id('response'),
+    redactor: new StreamingSecretRedactor(),
+    pending: '',
+    text: '',
+    sequence: 0,
+    lastPublishedAt: 0
+  }
+}
+
+function normalizeProviderPhase (phase) {
+  return ['connecting', 'authenticating', 'preparing', 'thinking', 'responding'].includes(phase)
+    ? phase
+    : 'responding'
+}
+
+function nonnegativeInteger (value) {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? Math.max(0, Math.trunc(parsed)) : 0
+}
+
+function providerEventError (value = {}) {
+  const error = new Error(value.safeMessage || 'AI Provider 返回了安全错误。')
+  error.code = value.code || 'AGENT_PROVIDER_ERROR'
+  error.category = value.category || 'transport_error'
+  error.retryable = value.retryable === true
+  error.safeMessage = value.safeMessage || 'AI Provider 返回了安全错误。'
+  error.source = 'harness'
+  return error
+}
+
+function providerCloseReason (status) {
+  if (status === 'complete' || status === 'inconclusive' || status === 'blocked') return 'completed'
+  if (status === 'cancelled') return 'cancelled'
+  return 'failed'
+}
+
+module.exports = { AgentSessionManager, TaskMailbox, id, sameBinding, statusReason, safeError, looksSensitiveInput, containsSensitiveMaterial, mutationVerificationResult, buildVerificationFollowUp, recordWithPendingVerification, sanitizeDecision, chunkText, createProviderDraft, normalizeProviderPhase, nonnegativeInteger, providerEventError, providerCloseReason, completionOutcome, summarizeVerifiedFacts, summarizeDirectLookup, bundleInvocation, bundleFailureObservation }

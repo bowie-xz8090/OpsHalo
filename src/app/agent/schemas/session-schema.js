@@ -7,6 +7,7 @@ const {
 const { HarnessSelectionSchema } = require('./harness-schema')
 const { FactRecordSchema, ObservationSchema } = require('./observation-schema')
 const { FinalResultSchema, VerificationOutcomeSchema } = require('./verification-schema')
+const { KnowledgeCitationSchema } = require('./knowledge-schema')
 
 const AgentStartRequestSchema = z.strictObject({
   schemaVersion: VersionSchema,
@@ -117,6 +118,12 @@ const AgentSessionRecordSchema = z.strictObject({
     message: z.string().min(1).max(200),
     updatedAt: IsoDateSchema
   }).optional(),
+  assistantResponse: z.strictObject({
+    responseId: IdSchema,
+    text: z.string().max(5000),
+    status: z.enum(['streaming', 'completed', 'interrupted']),
+    updatedAt: IsoDateSchema
+  }).optional(),
   budget: BudgetStateSchema,
   memory: WorkingMemorySchema,
   latestObservation: ObservationSchema.optional(),
@@ -125,6 +132,7 @@ const AgentSessionRecordSchema = z.strictObject({
   pendingUserInput: z.record(z.string(), z.unknown()).optional(),
   verification: z.strictObject({ outcomes: z.array(VerificationOutcomeSchema).max(100) }).optional(),
   finalResult: FinalResultSchema.optional(),
+  knowledgeCitations: z.array(KnowledgeCitationSchema).max(100).optional(),
   evidenceRefs: z.array(z.string().max(1000)).max(500),
   recentErrors: z.array(AgentErrorSchema).max(20)
 })

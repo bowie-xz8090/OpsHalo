@@ -122,7 +122,7 @@ export default class AttachAddonCustom {
     if (typeof ev.data === 'string') {
       try {
         const msg = JSON.parse(ev.data)
-        if (msg.action === 'zmodem-event' || msg.action === 'trzsz-event' || msg.action === 'xmodem-event') {
+        if (msg.action === 'zmodem-event' || msg.action === 'trzsz-event') {
           return
         }
       } catch (e) {}
@@ -343,11 +343,12 @@ export default class AttachAddonCustom {
     const data = buf.length === 1 ? buf[0] : buf.join('')
     const { term } = this
     this._lastFlushTime = Date.now()
-    term.write(data)
-    // Notify parent that the terminal buffer has been updated (echo received),
-    // once per flush instead of once per chunk.
-    term?.parent?.notifyOnData()
-    term?.parent?.onTerminalWrite?.()
+    term.write(data, () => {
+      // Notify only after xterm parsed this chunk. Agent result cards use this
+      // boundary to stay behind the complete command output and new prompt.
+      term?.parent?.notifyOnData()
+      term?.parent?.onTerminalWrite?.(data)
+    })
   }
 
   sendToServer = (data) => {
@@ -356,6 +357,9 @@ export default class AttachAddonCustom {
       (data === '\r' || data === '\n') &&
       this.term?.parent?.shouldInterceptSmartShellEnter?.()
     ) {
+      return
+    }
+    if (this.term?.parent?.captureAgentTerminalInput?.(data)) {
       return
     }
     // Start echo detection when password prompt is suspected

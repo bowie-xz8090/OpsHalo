@@ -55,7 +55,7 @@ class ToolGateway {
     })
     if (decision.outcome === 'allow') {
       session.budget = consumeAutoRead(session.budget)
-      return { decision, intent, mutability, timeoutMs, capability: this.issueCapability(session, intent, decision) }
+      return { decision, intent, mutability, timeoutMs, capability: this.issueCapability(session, intent, decision, 'auto_read') }
     }
     const taskGrant = decision.outcome === 'require_approval' && this.approvals.hasTaskGrant(session, intent, decision)
     if (taskGrant) {
@@ -98,8 +98,26 @@ class ToolGateway {
       sessionFingerprint: sessionFingerprint(session.sessionBinding),
       policyVersion: this.policyEngine.policy.version
     }
-    this.capabilities.verify(capability, expected, { consume: true })
-    this.audit.append('execution.started', { ...expected, toolName: intent.toolName, target: intent.target, argumentsHash: intent.intentDigest })
+    let claims
+    try {
+      claims = this.capabilities.verify(capability, expected, { consume: true })
+    } catch (error) {
+      this.audit.append('execution.rejected', {
+        taskId: session.taskId,
+        invocationId: intent.invocationId,
+        code: error.code || 'AGENT_CAPABILITY_INVALID'
+      })
+      throw error
+    }
+    this.audit.append('execution.started', {
+      ...expected,
+      toolName: intent.toolName,
+      target: intent.target,
+      argumentsHash: intent.intentDigest,
+      mutability,
+      authorizationScope: claims.scope,
+      decisionComplete: true
+    })
     const result = await this.runtime.execute(session, definition, intent, item.executor, signal, capability, authorizedTimeoutMs)
     this.audit.append('execution.finished', {
       taskId: session.taskId,
@@ -110,7 +128,7 @@ class ToolGateway {
       durationMs: result.durationMs,
       remoteTermination: result.remoteTermination
     })
-    if (result.status === 'success' && definition.parserId !== 'shell') {
+    if (result.status === 'success' && definition.resultEncoding === 'json') {
       try {
         this.registry.validateResult(intent.toolName, JSON.parse(result._rawStreams?.stdout || '{}'))
       } catch (error) {

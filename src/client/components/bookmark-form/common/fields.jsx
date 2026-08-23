@@ -14,10 +14,7 @@ import SshAgent from './ssh-agent.jsx'
 import ConnectionHopping from './connection-hopping.jsx'
 import TerminalBackgroundField from './terminal-background.jsx'
 import ExecSettingsField from './exec-settings-field.jsx'
-import useQuickCmds from './quick-commands.jsx'
-import ProfileItem from './profile-item.jsx'
 import renderRunScripts from './run-scripts.jsx'
-import SerialPathSelector from './serial-path-selector.jsx'
 import SshHostSelector from './ssh-host-selector.jsx'
 import SshAuthTypeSelector from './ssh-auth-type-selector.jsx'
 import SshAuthSelector from './ssh-auth-selector.jsx'
@@ -168,22 +165,8 @@ export function renderFormItem (item, formItemLayout, form, ctxProps, index) {
       return <TerminalBackgroundField key={name} />
     case 'execSettings':
       return <ExecSettingsField key={name} />
-    case 'profileItem':
-      return <ProfileItem key={name} store={ctxProps.store} profileFilter={item.profileFilter} />
-    case 'quickCommands':
-      return <Fragment key={name}>{useQuickCmds(form, ctxProps.formData || {})}</Fragment>
     case 'runScripts':
       return <Fragment key={name}>{renderRunScripts()}</Fragment>
-    case 'serialPathSelector':
-      return (
-        <SerialPathSelector
-          key={name}
-          serials={ctxProps.serials}
-          loaddingSerials={ctxProps.loaddingSerials}
-          store={ctxProps.store}
-          {...item.props}
-        />
-      )
     case 'sshHostSelector':
       return (
         <SshHostSelector

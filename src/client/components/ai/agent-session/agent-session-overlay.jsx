@@ -8,15 +8,18 @@ import AgentFinalCard from './agent-final-card'
 import { currentAgentActivity } from '../../../store/agent-session-view.mjs'
 import './agent-session.styl'
 
-export default function AgentSessionOverlay ({ session, onControl, getEvidence, deleteEvidence, onHandoff, onFollowUp, onClose }) {
+export default function AgentSessionOverlay ({ session, onControl, getEvidence, deleteEvidence, onHandoff, finalDetailsOpen, onLayoutChange, onClose, embedded = false, readOnly = false }) {
   const [evidenceRef, setEvidenceRef] = useState(null)
   if (!session) return null
   const hasTimeline = !!session.timeline?.length
-  const minimal = !session.plan && !hasTimeline && !session.pendingApproval && !session.pendingUserInput && !session.finalResult
+  const minimal = embedded
+    ? !session.pendingApproval && !session.pendingUserInput && !session.finalResult
+    : !session.plan && !hasTimeline && !session.pendingApproval && !session.pendingUserInput && !session.finalResult
+  const contentSized = embedded && !minimal
   const activity = currentAgentActivity(session)
   return (
-    <div className={`agent-session-overlay-inner${minimal ? ' is-thinking-only' : ''}`}>
-      <AgentSessionHeader session={session} onControl={onControl} onClose={onClose} minimal={minimal} />
+    <div className={`agent-session-overlay-inner${minimal ? ' is-thinking-only' : ''}${embedded ? ' is-embedded' : ''}${contentSized ? ' is-content-sized' : ''}`}>
+      <AgentSessionHeader session={session} onControl={onControl} onClose={onClose} minimal={minimal} embedded={embedded} readOnly={readOnly} />
       {!minimal && !session.finalResult && activity && (
         <section className='agent-current-activity' aria-live='polite'>
           <span className='agent-activity-dot' aria-hidden='true' />
@@ -29,13 +32,17 @@ export default function AgentSessionOverlay ({ session, onControl, getEvidence, 
           <p>{session.plan.missingInformation.join('；')}</p>
         </details>
       )}
-      <AgentTimeline
-        timeline={session.timeline}
-        onEvidence={setEvidenceRef}
-        awaitingApproval={!!session.pendingApproval}
-      />
+      {!session.finalResult && (
+        <AgentTimeline
+          timeline={session.timeline}
+          onEvidence={setEvidenceRef}
+          awaitingApproval={!!session.pendingApproval}
+        />
+      )}
       <AgentApprovalCard
         approval={session.pendingApproval}
+        resolvedDecision={session._embeddedResolvedDecision}
+        readOnly={readOnly}
         onDecision={decision => onControl('resolve_approval', { decision })}
         onRevise={revisedCommand => onControl('revise_approval', {
           approvalRequestId: session.pendingApproval.approvalRequestId,
@@ -48,13 +55,7 @@ export default function AgentSessionOverlay ({ session, onControl, getEvidence, 
         onCancel={() => onControl('cancel', { reason: 'user_input_cancelled' })}
         onHandoff={onHandoff}
       />
-      <AgentFinalCard
-        result={session.finalResult}
-        onEvidence={setEvidenceRef}
-        onClear={() => deleteEvidence({ taskId: session.taskId })}
-        canClear={!String(session.taskId).startsWith('pending_')}
-        onFollowUp={onFollowUp}
-      />
+      <AgentFinalCard result={session.finalResult} detailsOpen={finalDetailsOpen} onLayoutChange={onLayoutChange} />
       <AgentEvidenceDetail
         taskId={session.taskId}
         evidenceRef={evidenceRef}

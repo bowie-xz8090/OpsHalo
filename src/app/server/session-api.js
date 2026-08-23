@@ -74,7 +74,7 @@ async function describeAgentSession (body) {
   }
 }
 
-async function agentExecCmd (body) {
+async function agentExecCmd (body, onProgress) {
   const { pid, command, timeoutMs, invocationId, capability, expected } = body
   const term = terminals(pid)
   if (!term || typeof term.execCommand !== 'function') throw new Error('Exec channel not supported for this session type')
@@ -82,7 +82,7 @@ async function agentExecCmd (body) {
   const binding = await describeAgentSession({ pid })
   const actualExpected = { ...expected, sessionFingerprint: sessionFingerprint(binding), invocationId }
   capabilityVerifier.verifyExternal(capability, actualExpected, { consume: true })
-  return term.execCommand(command, { timeoutMs, invocationId })
+  return term.execCommand(command, { timeoutMs, invocationId, onChunk: onProgress })
 }
 
 async function agentCancelExec (body) {

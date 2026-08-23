@@ -328,6 +328,10 @@ export default Store => {
     index,
     batch
   ) {
+    const sessionType = newTab.type || (newTab.host ? 'ssh' : 'local')
+    if (sessionType !== 'ssh' && sessionType !== 'local') {
+      return message.warning('Mini 版仅支持 SSH 连接和本地终端')
+    }
     if (
       (!newTab.type || newTab.type === 'local') &&
       !newTab.host &&

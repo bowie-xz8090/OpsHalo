@@ -1,6 +1,6 @@
 /**
  * Deep link support for electerm
- * Handles protocol URLs like ssh://, telnet://, rdp://, vnc://, etc.
+ * Handles the Mini product's SSH and internal electerm URLs.
  */
 
 const { app } = require('electron')
@@ -13,11 +13,9 @@ const { parseQuickConnect } = require('../common/parse-quick-connect')
 
 /**
  * Protocols registered as OS-level deep link handlers.
- * http/https are intentionally excluded: registering them would make electerm
- * the handler for every clicked web link, hijacking the user's default browser.
- * They remain parseable via quick-connect (normalized to type "web").
+ * Other historical session protocols are intentionally not registered.
  */
-const DEEP_LINK_PROTOCOLS = ['ssh', 'telnet', 'vnc', 'rdp', 'spice', 'serial', 'ftp', 'electerm']
+const DEEP_LINK_PROTOCOLS = ['ssh', 'electerm']
 
 /**
  * Register electerm as a handler for supported protocols

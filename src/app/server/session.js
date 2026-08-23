@@ -1,5 +1,5 @@
 /**
- * terminal/sftp/serial class
+ * SSH and local terminal session factory.
  */
 
 /**
@@ -7,8 +7,9 @@
  * @param {string} type - Terminal type
  * @returns {Object} The loaded module
  */
-function loadModule (type) {
-  return require(`./session-${type}`)
+const sessionModules = {
+  local: () => require('./session-local'),
+  ssh: () => require('./session-ssh')
 }
 
 /**
@@ -19,16 +20,13 @@ function loadModule (type) {
  */
 exports.startSession = async function (initOptions, ws, func = 'session') {
   const type = initOptions.termType || initOptions.type || 'ssh'
-  const tail = [
-    'telnet',
-    'serial',
-    'local',
-    'rdp',
-    'vnc',
-    'spice'
-  ].includes(type)
-    ? type
-    : 'ssh'
-  const module = loadModule(tail)
+  const normalizedType = type === 'remote' ? 'ssh' : type
+  const loadModule = sessionModules[normalizedType]
+  if (!loadModule) {
+    const error = new Error(`Unsupported session type: ${type}`)
+    error.code = 'UNSUPPORTED_SESSION_TYPE'
+    throw error
+  }
+  const module = loadModule()
   return module[func](initOptions, ws)
 }

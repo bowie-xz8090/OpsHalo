@@ -36,11 +36,6 @@ export default Store => {
     window.store.openConnectionModal(item)
   }
 
-  Store.prototype.handleOpenQuickCommandsSetting = function () {
-    // Quick commands removed in mini edition
-    window.store.openSetting()
-  }
-
   Store.prototype.onSelectHistory = function (tab) {
     const { store } = window
     const type = tab?.type || 'ssh'

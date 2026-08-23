@@ -17,6 +17,11 @@ class EvidenceStore {
     return new EvidenceManifest(this.rootPath, taskId)
   }
 
+  createStreamingWriter (options) {
+    const { StreamingEvidenceWriter } = require('./streaming-evidence-writer')
+    return new StreamingEvidenceWriter(this, options)
+  }
+
   write ({ taskId, invocationId, kind, mediaType = 'text/plain', redactedContent, redactionSummary, critical = false }) {
     const evidenceId = `evidence_${crypto.randomBytes(18).toString('base64url')}`
     const createdAt = new Date()

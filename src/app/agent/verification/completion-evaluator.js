@@ -1,45 +1,58 @@
+const { CompletionDecisionSchema } = require('../schemas/verification-schema')
+
 class CompletionEvaluator {
   async evaluate (session) {
-    const critical = session.memory.completionCriteria.filter(item => item.critical)
-    const missingCriteria = critical.filter(item => item.status !== 'passed' || !item.evidenceRefs.length)
+    const verifiedFacts = session.memory.facts.filter(item => item.confidence !== 'inferred')
+    const factIdsByEvidence = indexFactIdsByEvidence(verifiedFacts)
+    const criterionResults = session.memory.completionCriteria.map(criterion => {
+      const factIds = [...new Set((criterion.evidenceRefs || []).flatMap(reference => factIdsByEvidence.get(reference) || []))]
+      const status = criterion.status === 'passed' && factIds.length
+        ? 'met'
+        : criterion.status === 'failed'
+          ? 'unmet'
+          : 'unknown'
+      return { criterionId: criterion.criterionId, status, factIds }
+    })
+    const criticalResults = session.memory.completionCriteria
+      .map((criterion, index) => ({ criterion, result: criterionResults[index] }))
+      .filter(item => item.criterion.critical)
+    const missingCriteria = criticalResults.filter(item => item.result.status !== 'met')
     const unresolvedContradictions = session.memory.contradictions.filter(item => item.impact === 'critical' && item.status !== 'resolved')
     const unverifiedChanges = session.memory.changeRecords.filter(item => item.verificationStatus !== 'passed')
-    let status = 'complete'
-    let conclusion = session.memory.facts.length ? summarizeFacts(session.memory.facts) : '已完成当前目标的证据检查。'
-    let reason
+    let status = 'satisfied'
+    const warnings = []
     if (unverifiedChanges.length) {
-      status = session.memory.changeRecords.length > 1 ? 'partial' : 'failed'
-      conclusion = '存在未验证、验证失败或状态未知的变更，不能宣称操作完成。'
-      reason = { code: 'unverified_change', safeMessage: conclusion, recoverable: false }
+      status = 'failed'
+      warnings.push('存在未验证、验证失败或状态未知的变更，不能宣称操作完成。')
     } else if (unresolvedContradictions.length) {
       status = 'inconclusive'
-      conclusion = '关键证据存在未解决的矛盾。'
-      reason = { code: 'critical_contradiction', safeMessage: conclusion, recoverable: true }
-    } else if (missingCriteria.length || !session.memory.facts.length) {
+      warnings.push('命令输出中的信息不一致，暂时无法确认最终结果。')
+    } else if (missingCriteria.length || !verifiedFacts.length) {
       status = 'inconclusive'
-      conclusion = '当前证据不足以满足全部关键完成判据。'
-      reason = { code: 'insufficient_evidence', safeMessage: conclusion, recoverable: true }
+      warnings.push('目前的命令输出还不能确认全部结果。')
     }
-    return {
+    return CompletionDecisionSchema.parse({
       status,
-      reason,
-      finalResult: {
-        status,
-        conclusion,
-        confirmedFacts: session.memory.facts.filter(f => f.confidence !== 'inferred'),
-        inferences: session.memory.facts.filter(f => f.confidence === 'inferred'),
-        unresolvedItems: [...session.memory.missingInformation, ...missingCriteria.map(item => item.statement)],
-        operations: session.memory.changeRecords,
-        verificationOutcomes: session.verification?.outcomes || [],
-        evidenceRefs: session.evidenceRefs,
-        completedAt: new Date().toISOString()
-      }
-    }
+      criterionResults,
+      unresolved: [...new Set([
+        ...session.memory.missingInformation,
+        ...missingCriteria.map(item => item.criterion.statement)
+      ])].slice(0, 100),
+      warnings,
+      maySynthesize: verifiedFacts.length > 0 && !['blocked', 'cancelled'].includes(status)
+    })
   }
 }
 
-function summarizeFacts (facts) {
-  return facts.slice(0, 5).map(item => item.statement).join('；').slice(0, 5000)
+function indexFactIdsByEvidence (facts) {
+  const result = new Map()
+  for (const fact of facts) {
+    for (const reference of fact.evidenceRefs || []) {
+      if (!result.has(reference)) result.set(reference, [])
+      result.get(reference).push(fact.factId)
+    }
+  }
+  return result
 }
 
-module.exports = { CompletionEvaluator, summarizeFacts }
+module.exports = { CompletionEvaluator, indexFactIdsByEvidence }

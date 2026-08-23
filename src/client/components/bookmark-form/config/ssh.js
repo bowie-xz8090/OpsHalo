@@ -2,7 +2,7 @@
 import { formItemLayout } from '../../../common/form-layout.js'
 import { connectionMap, authTypeMap, defaultEnvLang } from '../../../common/constants.js'
 import defaultSetting from '../../../common/default-setting.js'
-import { createBaseInitValues, getTerminalDefaults, getSshDefaults, getTerminalBackgroundDefaults, getAuthTypeDefault } from '../common/init-values.js'
+import { createBaseInitValues, getTerminalDefaults, getSshDefaults, getTerminalBackgroundDefaults } from '../common/init-values.js'
 import { commonFields } from './common-fields.js'
 
 const e = window.translate
@@ -11,7 +11,12 @@ const miniSshAuthFields = [
   commonFields.title,
   { ...commonFields.host, type: 'sshHostSelector' },
   commonFields.username,
-  { type: 'sshAuthTypeSelector', name: 'authType', label: '' },
+  {
+    type: 'sshAuthTypeSelector',
+    name: 'authType',
+    label: '',
+    props: { filterAuthType: type => type !== authTypeMap.profiles }
+  },
   { type: 'sshAuthSelector', name: '__auth__', label: '', formItemName: 'password' },
   commonFields.port,
   {
@@ -29,7 +34,7 @@ const sshConfig = {
   type: connectionMap.ssh,
   initValues: (props) => {
     const { store } = props
-    return createBaseInitValues(props, connectionMap.ssh, {
+    const initial = createBaseInitValues(props, connectionMap.ssh, {
       port: 22,
       authType: authTypeMap.password,
       envLang: defaultEnvLang,
@@ -44,9 +49,10 @@ const sshConfig = {
       compress: [],
       ...getTerminalDefaults(store),
       ...getSshDefaults(),
-      ...getTerminalBackgroundDefaults(defaultSetting),
-      ...getAuthTypeDefault(props)
+      ...getTerminalBackgroundDefaults(defaultSetting)
     })
+    if (initial.authType === authTypeMap.profiles) initial.authType = authTypeMap.password
+    return initial
   },
   layout: formItemLayout,
   tabs: () => [

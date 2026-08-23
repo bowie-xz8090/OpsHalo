@@ -9,7 +9,6 @@ import Sidebar from '../sidebar'
 import CssOverwrite from '../bg/css-overwrite'
 import UiTheme from './ui-theme'
 import CustomCss from '../bg/custom-css.jsx'
-import Resolutions from '../rdp/resolution-edit'
 import TerminalInteractive from '../terminal/terminal-interactive'
 import ConfirmModalStore from '../file-transfer/conflict-resolve.jsx'
 import TransferQueue from '../file-transfer/transfer-queue'
@@ -80,7 +79,6 @@ export default auto(function Index (props) {
     store.isSecondInstance = window.pre.runSync('isSecondInstance')
     store.initData()
     store.checkForDbUpgrade()
-    store.handleGetSerials()
     store.checkPendingDeepLink()
   }, [])
 
@@ -91,11 +89,9 @@ export default auto(function Index (props) {
     fullscreen,
     pinned,
     isSecondInstance,
-    pinnedQuickCommandBar,
     fileTransfers,
     uiThemeConfig,
     transferToConfirm,
-    openResolutionEdit,
     rightPanelTitle,
     rightPanelTab,
     connectionModalVisible,
@@ -111,7 +107,6 @@ export default auto(function Index (props) {
     'is-win': isWin,
     pinned,
     'not-win': !isWin,
-    'qm-pinned': pinnedQuickCommandBar,
     fullscreen,
     'is-main': !isSecondInstance,
     'is-mobile': store.isMobile,
@@ -171,8 +166,7 @@ export default auto(function Index (props) {
       'isSyncingSetting',
       'leftSidePanelWidth',
       'leftSideBarWidth',
-      'sidebarPanelTab',
-      'openWidgetsModal'
+      'sidebarPanelTab'
     ]),
     zoom: config.zoom,
     pinned
@@ -189,11 +183,6 @@ export default auto(function Index (props) {
     fileTransferChanged: JSON.stringify(copiedTransfer),
     fileTransfers: copiedTransfer
   }
-  const resProps = {
-    resolutions: deepCopy(store.resolutions),
-    openResolutionEdit
-  }
-
   const rightPanelProps = {
     rightPanelVisible: store.rightPanelVisible,
     rightPanelPinned: store.rightPanelPinned,
@@ -279,7 +268,6 @@ export default auto(function Index (props) {
           config={config}
         />
         <Remote2RemoteHandlers />
-        <Resolutions {...resProps} />
         <InfoModal {...infoModalProps} />
         <RightSidePanel {...rightPanelProps}>
           {!isAIDisabled() && <AIChat {...aiChatProps} />}

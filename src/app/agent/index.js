@@ -1,4 +1,5 @@
 const { app, BrowserWindow, ipcMain, shell } = require('electron')
+const path = require('path')
 const globalState = require('../lib/glob-state')
 const { runtimeRoot, codexAccountsRoot, normalizeFeatureFlags } = require('./config')
 const { SessionStore } = require('./session/session-store')
@@ -20,7 +21,9 @@ const { SftpAdapter } = require('./execution/sftp-adapter')
 const { BackgroundTaskAdapter } = require('./execution/background-task-adapter')
 const { SecretRedactor } = require('./observation/secret-redactor')
 const { ObservationPipeline } = require('./observation/observation-pipeline')
+const { OpenAIObservationSummarizer } = require('./observation/optional-summarizer')
 const { CompletionEvaluator } = require('./verification/completion-evaluator')
+const { GroundedFinalSynthesizer } = require('./verification/grounded-final-synthesizer')
 const { VerificationRunner } = require('./verification/verification-runner')
 const { HarnessFactory } = require('./harness/harness-factory')
 const { AgentSessionManager } = require('./session/session-manager')
@@ -29,6 +32,9 @@ const { registerCodexIpc } = require('./ipc/register-codex-ipc')
 const { CodexProfileStore } = require('./providers/codex-profile-store')
 const { CodexAppServerManager } = require('./providers/codex-app-server-manager')
 const { packInfo } = require('../common/runtime-constants')
+const { SkillRegistry } = require('./knowledge/skill-registry')
+const { LocalKnowledgeBase } = require('./knowledge/local-knowledge-base')
+const { createRuntimeConfigRefresher } = require('./runtime-config-refresh')
 
 let instance
 
@@ -50,7 +56,7 @@ function initAgentRuntime () {
   const secret = globalState.get('agentCapabilitySecret')
   const capabilities = new CapabilityTokenManager(secret)
   const approvals = new ApprovalManager(capabilities)
-  const execution = new ExecutionRuntime()
+  const execution = new ExecutionRuntime({ evidenceStore })
   const bridge = new SessionExecutionBridge(() => globalState.get('serverChild'))
   const ssh = new SshExecAdapter(bridge)
   const registry = registerBuiltinTools(new ToolRegistry(), {
@@ -60,7 +66,14 @@ function initAgentRuntime () {
     background: new BackgroundTaskAdapter(ssh)
   })
   const gateway = new ToolGateway({ registry, policyEngine, approvals, capabilities, runtime: execution, audit })
-  const observationPipeline = new ObservationPipeline({ evidenceStore, audit, redactor: new SecretRedactor(config.agentSensitivePatterns || []) })
+  const observationPipeline = new ObservationPipeline({
+    evidenceStore,
+    audit,
+    redactor: new SecretRedactor(config.agentSensitivePatterns || []),
+    summarizer: new OpenAIObservationSummarizer(() => globalState.get('config') || {})
+  })
+  const skillRegistry = new SkillRegistry({ config })
+  const knowledgeBase = new LocalKnowledgeBase({ root: path.join(root, 'knowledge'), config, redactor: new SecretRedactor(config.agentSensitivePatterns || []) })
   const verificationRunner = new VerificationRunner(gateway, observationPipeline)
   const profileStore = new CodexProfileStore(codexAccountsRoot(app.getPath('userData')))
   const codexManager = new CodexAppServerManager({
@@ -71,6 +84,7 @@ function initAgentRuntime () {
     isProfileBusy: profileId => manager?.hasActiveProfile(profileId) === true
   })
   const harnessFactory = new HarnessFactory(() => globalState.get('config') || {}, { codexManager })
+  let flushPendingConfig = () => {}
   const manager = new AgentSessionManager({
     store,
     evidenceStore,
@@ -79,15 +93,31 @@ function initAgentRuntime () {
     gateway,
     observationPipeline,
     completionEvaluator: new CompletionEvaluator(),
+    finalSynthesizer: new GroundedFinalSynthesizer(() => globalState.get('config') || {}),
     verificationRunner,
+    skillRegistry,
+    knowledgeBase,
     featureFlags,
     policyVersion: policy.version,
+    onRuntimeSettled: () => flushPendingConfig(),
     publish: (ownerWindowId, event) => {
       const win = BrowserWindow.fromId(ownerWindowId)
       if (win && !win.isDestroyed()) win.webContents.send('agent:event', event)
     }
   })
   execution.setProgressHandler((session, intent, value) => manager.reportProgress(session, intent, value))
+  const configRefresher = createRuntimeConfigRefresher({
+    manager,
+    policyEngine,
+    skillRegistry,
+    knowledgeBase,
+    loadPolicy: (nextConfig, nextFeatureFlags) => new PolicyLoader(root, {
+      ...nextFeatureFlags,
+      commandBlacklist: nextConfig?.commandBlacklist,
+      commandWhitelist: nextConfig?.commandWhitelist
+    }).load()
+  })
+  flushPendingConfig = configRefresher.flush
   const unregisterIpc = registerAgentIpc({ ipcMain, manager, evidenceStore })
   const unregisterCodexIpc = registerCodexIpc({ ipcMain, manager: codexManager, openExternal: url => shell.openExternal(url) })
   const publishAccountEvent = event => {
@@ -113,28 +143,17 @@ function initAgentRuntime () {
     manager,
     profileStore,
     codexManager,
+    skillRegistry,
+    knowledgeBase,
     recovered,
     registerMcpTools: tools => registerMcpTools(registry, tools),
-    refreshConfig: nextConfig => {
-      if ([...manager.sessions.values()].some(runtime => !runtime.finished)) {
-        return { deferred: true }
-      }
-      const nextFeatureFlags = normalizeFeatureFlags(nextConfig || {})
-      const nextPolicy = new PolicyLoader(root, {
-        ...nextFeatureFlags,
-        commandBlacklist: nextConfig?.commandBlacklist,
-        commandWhitelist: nextConfig?.commandWhitelist
-      }).load()
-      manager.featureFlags = nextFeatureFlags
-      manager.policyVersion = nextPolicy.version
-      policyEngine.policy = nextPolicy
-      return nextFeatureFlags
-    },
+    refreshConfig: nextConfig => configRefresher.refresh(nextConfig),
     dispose: () => {
       app.removeListener('before-quit', disposeOnQuit)
       unregisterIpc()
       unregisterCodexIpc()
       codexManager.removeListener('accountEvent', publishAccountEvent)
+      manager.dispose().catch(() => {})
       codexManager.dispose().catch(() => {})
       evidenceCleaner.stop()
       bridge.dispose()

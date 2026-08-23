@@ -1,15 +1,15 @@
 // load-widget.js
 
-const fs = require('fs')
 const path = require('path')
 // const log = require('../common/log')
 
 // Store running widget instances
 const runningInstances = new Map()
 const widgetIdPattern = /^[a-z0-9-]+$/
+const supportedWidgetIds = new Set(['mcp-server'])
 
 function resolveWidgetPath (widgetId, widgetDirectory = __dirname) {
-  if (typeof widgetId !== 'string' || !widgetIdPattern.test(widgetId)) {
+  if (typeof widgetId !== 'string' || !widgetIdPattern.test(widgetId) || !supportedWidgetIds.has(widgetId)) {
     throw new Error(`Invalid widget ID: ${widgetId}`)
   }
 
@@ -24,7 +24,7 @@ function resolveWidgetPath (widgetId, widgetDirectory = __dirname) {
 }
 
 function listWidgetsFromFolder (widgetDirectory = __dirname) {
-  const widgetFiles = fs.readdirSync(widgetDirectory).filter(file => file.startsWith('widget-') && file.endsWith('.js'))
+  const widgetFiles = [...supportedWidgetIds].map(id => `widget-${id}.js`)
   const res = []
   for (const file of widgetFiles) {
     try {
@@ -42,32 +42,7 @@ function listWidgetsFromFolder (widgetDirectory = __dirname) {
 }
 
 function listWidgets () {
-  const widgets1 = listWidgetsFromFolder()
-  return widgets1
-  // if (process.versions.electron === undefined) {
-  //   return widgets1
-  // }
-  // const {
-  //   appPath
-  // } = require('../common/app-props')
-  // const userWidgetsDir = path.resolve(
-  //   appPath, 'widgets'
-  // )
-  // // Ensure user widgets directory exists when app starts
-  // try {
-  //   if (!fs.existsSync(userWidgetsDir)) {
-  //     fs.mkdirSync(userWidgetsDir, { recursive: true })
-  //   }
-  // } catch (err) {
-  //   log.error(`Failed to create user widgets directory ${userWidgetsDir}:`, err)
-  // }
-  // const widgets2 = listWidgetsFromFolder(
-  //   userWidgetsDir
-  // )
-  // return [
-  //   ...widgets1,
-  //   ...widgets2
-  // ]
+  return listWidgetsFromFolder()
 }
 
 function hasRunningInstance (widgetId) {

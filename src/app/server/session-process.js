@@ -67,7 +67,7 @@ async function runSessionServer (type, port) {
   })
 }
 
-async function sendMsgToChildProcess (pid, msg) {
+async function sendMsgToChildProcess (pid, msg, onProgress) {
   const child = typeof pid === 'object' ? pid : activeTerminals.get(pid)?.child
   if (!child) {
     throw new Error(`Terminal with PID ${pid} not found`)
@@ -76,6 +76,10 @@ async function sendMsgToChildProcess (pid, msg) {
   return new Promise((resolve, reject) => {
     const responseHandler = (response) => {
       if (response.id === msg.id) {
+        if (response.progress) {
+          onProgress?.(response.progress)
+          return
+        }
         child.removeListener('message', responseHandler)
         if (response.error) {
           const error = new Error(response.error.safeMessage || response.error.message || 'Session child request failed')
@@ -101,15 +105,7 @@ exports.terminal = async function (initOptions, ws, uid) {
   const port = await getPort()
   const child = await runSessionServer(type, port)
   const pid = initOptions.uid
-  const isSsh = ![
-    'telnet',
-    'serial',
-    'local',
-    'rdp',
-    'vnc',
-    'spice',
-    'ftp'
-  ].includes(type)
+  const isSsh = type === 'ssh' || type === 'remote'
   if (isSsh) {
     child.on('message', (m) => {
       const { type, data } = m
@@ -127,17 +123,15 @@ exports.terminal = async function (initOptions, ws, uid) {
     child.removeAllListeners('message')
     activeTerminals.delete(pid)
   })
-  if (type !== 'ftp') {
-    try {
-      await sendMsgToChildProcess(child, {
-        id: uid,
-        action: 'create-terminal',
-        body: initOptions
-      })
-    } catch (err) {
-      child.kill()
-      throw err
-    }
+  try {
+    await sendMsgToChildProcess(child, {
+      id: uid,
+      action: 'create-terminal',
+      body: initOptions
+    })
+  } catch (err) {
+    child.kill()
+    throw err
   }
 
   // Kill any existing child process for this pid before overwriting.
@@ -166,15 +160,7 @@ exports.testConnection = async function (initOptions, ws, uid) {
   const port = await getPort()
   const child = await runSessionServer(type, port)
 
-  const isSsh = ![
-    'telnet',
-    'serial',
-    'local',
-    'rdp',
-    'vnc',
-    'spice',
-    'ftp'
-  ].includes(type)
+  const isSsh = type === 'ssh' || type === 'remote'
   if (isSsh && ws) {
     child.on('message', (m) => {
       const { type: msgType, data } = m
@@ -230,12 +216,12 @@ exports.terminals = function (pid) {
         body: { pid }
       })
     },
-    agentExecCommand: async (body, id) => {
+    agentExecCommand: async (body, id, onProgress) => {
       return sendMsgToChildProcess(pid, {
         id,
         action: 'agent-exec-cmd',
         body: { ...body, pid }
-      })
+      }, onProgress)
     },
     agentSftp: async (body, id) => {
       return sendMsgToChildProcess(pid, {

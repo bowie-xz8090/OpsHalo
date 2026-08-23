@@ -6,7 +6,7 @@ const verifier = process.env.agentCapabilitySecret
   ? new CapabilityTokenManager(process.env.agentCapabilitySecret)
   : null
 
-async function dispatchAgentMessage (message) {
+async function dispatchAgentMessage (message, onProgress) {
   if (!message || message.type !== 'agent' || !message.id || !message.action) throw new Error('Invalid Agent process message')
   const pid = String(message.pid || '')
   const terminal = terminals(pid)
@@ -21,7 +21,7 @@ async function dispatchAgentMessage (message) {
       invocationId: message.expected.invocationId,
       capability: message.capability,
       expected: message.expected
-    }, message.id)
+    }, message.id, onProgress)
   }
   if (message.action === 'sftp') {
     if (!verifier) throw new Error('Agent capability verifier is unavailable')
@@ -44,7 +44,9 @@ function registerAgentProcessMessages () {
   process.on('message', async message => {
     if (message?.type !== 'agent') return
     try {
-      const data = await dispatchAgentMessage(message)
+      const data = await dispatchAgentMessage(message, progress => {
+        process.send({ type: 'agent-progress', id: message.id, progress })
+      })
       process.send({ type: 'agent-response', id: message.id, data })
     } catch (error) {
       process.send({

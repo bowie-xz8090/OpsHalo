@@ -1,4 +1,5 @@
 const DOMAIN_RULES = Object.freeze([
+  { pattern: /nginx/i, prefixes: ['nginx.', 'service.'] },
   { pattern: /docker|podman|container|容器|镜像/i, prefixes: ['docker.'] },
   { pattern: /service|systemd|服务|守护进程/i, prefixes: ['service.'] },
   { pattern: /process|进程|pid|cpu|内存|memory/i, prefixes: ['process.', 'metrics.', 'host.'] },
@@ -9,14 +10,20 @@ const DOMAIN_RULES = Object.freeze([
 ])
 
 function selectPublicTools (descriptors, context = {}, maxTools = 8) {
-  if (!Array.isArray(descriptors) || descriptors.length <= maxTools) return descriptors || []
+  if (!Array.isArray(descriptors)) return []
+  const terminalTools = descriptors.filter(descriptor => ['shell.review_exec', 'shell.exec', 'terminal.pty_start'].includes(descriptor.name))
+  if (terminalTools.some(descriptor => descriptor.name === 'shell.review_exec')) {
+    return terminalTools
+      .sort((a, b) => terminalToolPriority(a.name) - terminalToolPriority(b.name))
+      .slice(0, maxTools)
+  }
   const text = [
     context.objective,
     ...(context.missingInformation || []),
     context.latestError?.safeMessage,
     ...(context.adaptationHints || []).map(item => `${item.code || ''} ${item.suggestedTool || ''}`)
   ].filter(Boolean).join(' ')
-  const wanted = new Set(['session.describe'])
+  const wanted = new Set(['session.describe', 'shell.review_exec', 'shell.exec'])
   for (const rule of DOMAIN_RULES) {
     if (!rule.pattern.test(text)) continue
     for (const descriptor of descriptors) {
@@ -29,11 +36,16 @@ function selectPublicTools (descriptors, context = {}, maxTools = 8) {
   if (!wanted.size || wanted.size === 1) {
     for (const name of ['host.profile', 'process.list', 'network.ports', 'service.status', 'docker.list', 'filesystem.list']) wanted.add(name)
   }
-  wanted.add('shell.exec')
   const scored = descriptors.map((descriptor, index) => ({
     descriptor,
     index,
-    score: wanted.has(descriptor.name) ? 100 : DOMAIN_RULES.reduce((score, rule) => score + (rule.pattern.test(text) && rule.prefixes.some(prefix => descriptor.name.startsWith(prefix)) ? 20 : 0), 0)
+    score: descriptor.name === 'shell.review_exec'
+      ? 300
+      : descriptor.name === 'shell.exec'
+        ? 250
+        : wanted.has(descriptor.name)
+          ? 100
+          : DOMAIN_RULES.reduce((score, rule) => score + (rule.pattern.test(text) && rule.prefixes.some(prefix => descriptor.name.startsWith(prefix)) ? 20 : 0), 0)
   }))
   return scored
     .sort((a, b) => b.score - a.score || a.index - b.index)
@@ -41,4 +53,10 @@ function selectPublicTools (descriptors, context = {}, maxTools = 8) {
     .map(item => item.descriptor)
 }
 
-module.exports = { DOMAIN_RULES, selectPublicTools }
+function terminalToolPriority (name) {
+  if (name === 'shell.review_exec') return 0
+  if (name === 'shell.exec') return 1
+  return 2
+}
+
+module.exports = { DOMAIN_RULES, selectPublicTools, terminalToolPriority }

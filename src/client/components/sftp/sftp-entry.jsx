@@ -5,7 +5,6 @@ import runIdle from '../../common/run-idle'
 import { Spin } from 'antd'
 import { notification } from '../common/notification'
 import Modal from '../common/modal'
-import clone from '../../common/to-simple-obj'
 import { isEqual, last, isNumber, some, isArray, pick, uniq, debounce } from 'lodash-es'
 import FileSection from './file-item'
 import resolve from '../../common/resolve'
@@ -17,8 +16,6 @@ import { getLocalFileInfo, getRemoteFileInfo, getFolderFromFilePath } from './fi
 import {
   typeMap, maxSftpHistory, paneMap,
   fileTypeMap,
-  terminalSerialType,
-  terminalFtpType,
   unexpectedPacketErrorDesc,
   sftpRetryInterval
 } from '../../common/constants'
@@ -32,7 +29,6 @@ import { LoadingOutlined, ReloadOutlined } from '@ant-design/icons'
 import * as owner from './owner-list'
 import AddressBar from './address-bar'
 import getProxy from '../../common/get-proxy'
-import { createTerm } from '../terminal/terminal-apis'
 import './sftp.styl'
 
 const e = window.translate
@@ -61,9 +57,6 @@ export default class Sftp extends Component {
   componentDidMount () {
     this.id = 'sftp-' + this.props.tab.id
     refs.add(this.id, this)
-    if (this.props.isFtp) {
-      this.initFtpData()
-    }
     this.timer = setTimeout(() => {
       this.setState({
         ready: true
@@ -127,31 +120,6 @@ export default class Sftp extends Component {
     // Clear sort cache to prevent memory leaks
     this._sortCache?.clear()
     this._lastSortArgs = null
-  }
-
-  initFtpData = async () => {
-    this.type = 'ftp'
-    const { tab } = this.props
-    const { id } = tab
-    const opts = clone({
-      tabId: id,
-      uid: tab.id,
-      srcTabId: tab.id,
-      termType: 'ftp',
-      ...tab
-    })
-    const r = await createTerm(opts)
-      .catch(err => {
-        const text = err.message
-        handleErr({ message: text })
-      })
-    if (!r) {
-      return
-    }
-    const {
-      port
-    } = r
-    this.initData(undefined, port)
   }
 
   directions = [
@@ -276,9 +244,7 @@ export default class Sftp extends Component {
   isActive () {
     const { currentBatchTabId, pane, sshSftpSplitView } = this.props
     const { tab } = this.props
-    const isFtp = tab.type === terminalFtpType
-
-    return (currentBatchTabId === tab.id && (pane === paneMap.fileManager || sshSftpSplitView)) || isFtp
+    return currentBatchTabId === tab.id && (pane === paneMap.fileManager || sshSftpSplitView)
   }
 
   updateKeyword = (keyword, type) => {
@@ -586,7 +552,7 @@ export default class Sftp extends Component {
 
   shouldRenderRemote = () => {
     const { props } = this
-    return props.tab?.host && props.tab?.type !== terminalSerialType
+    return !!props.tab?.host
   }
 
   initLocalAll = () => {
@@ -885,9 +851,7 @@ export default class Sftp extends Component {
         ]).slice(0, maxSftpHistory)
       }
       this.setState(update, () => {
-        if (this.type !== 'ftp') {
-          this.updateRemoteList(remote, remotePath, sftp)
-        }
+        this.updateRemoteList(remote, remotePath, sftp)
         this.props.editTab(tab.id, {
           sftpCreated: true
         })

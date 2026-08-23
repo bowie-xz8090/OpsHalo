@@ -335,8 +335,6 @@ describe('MCP server integration (live app + in-process SSH server)', () => {
       'cancel_electerm_terminal_command',
       'execute_electerm_command',
       'open_electerm_tab_ssh',
-      'open_electerm_tab_telnet',
-      'open_electerm_tab_serial',
       'open_electerm_tab_local',
       'list_electerm_bookmarks',
       'get_electerm_bookmark',

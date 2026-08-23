@@ -76,6 +76,89 @@ test('ordinary need_user ends the round without opening an embedded text input',
   assert.equal(result.events.some(event => event.type === 'user_input.requested'), false)
 })
 
+test('evaluated evidence can propose the next reviewed command without completing the task', () => {
+  const now = new Date().toISOString()
+  const state = {
+    status: 'evaluating',
+    snapshotVersion: 4,
+    updatedAt: now,
+    memory: { completionCriteria: [] }
+  }
+  const intent = {
+    invocationId: 'invocation_follow_up_12345',
+    toolName: 'shell.review_exec',
+    target: { display: '/etc/nginx/conf.d' },
+    purpose: '查看 Nginx conf.d 中可能遗漏的站点配置',
+    expectedObservation: 'Nginx 站点配置目录内容'
+  }
+  const result = reduceSession(state, {
+    type: 'FOLLOW_UP_PROPOSED',
+    intent,
+    reason: { code: 'follow_up_ready', safeMessage: '已准备下一项检查。', recoverable: true },
+    effectId: 'effect_follow_up_12345'
+  })
+  assert.equal(result.state.status, 'policy_check')
+  assert.equal(result.events[0].type, 'action.proposed')
+  assert.equal(result.events[0].payload.purpose, intent.purpose)
+  assert.equal(result.effects[0].type, 'EVALUATE_INTENT')
+  assert.equal(result.effects[0].intent, intent)
+})
+
+test('read probe bundles stay ordered through policy, execution and observation states', () => {
+  const now = new Date().toISOString()
+  const action = index => ({
+    schemaVersion: 1,
+    invocationId: `invocation_bundle_state_${index}`,
+    taskId: 'task_bundle_state_12345',
+    toolName: `probe.read_${index}`,
+    toolVersion: '1',
+    arguments: {},
+    target: { kind: 'host', canonicalId: 'example.test', display: `probe ${index}` },
+    purpose: `probe ${index}`,
+    expectedObservation: `result ${index}`
+  })
+  const planning = {
+    status: 'planning',
+    snapshotVersion: 2,
+    updatedAt: now,
+    memory: { planSummary: '', reasonSummary: '', missingInformation: [], completionCriteria: [] }
+  }
+  const decision = {
+    goalStatus: 'continue',
+    planSummary: 'parallel reads',
+    reasonSummary: 'independent reads',
+    missingInformation: ['service and port state'],
+    completionCriteria: [],
+    readProbeBundle: {
+      schemaVersion: 1,
+      bundleId: 'bundle_state_12345',
+      actions: [0, 1].map(index => ({ intent: action(index), dependsOn: [] }))
+    }
+  }
+  const proposed = reduceSession(planning, { type: 'PLANNER_DECISION', decision, effectId: 'effect_bundle_plan_12345' })
+  assert.equal(proposed.state.status, 'policy_check')
+  assert.deepEqual(proposed.events.filter(event => event.type === 'action.proposed').map(event => event.correlationId), ['invocation_bundle_state_0', 'invocation_bundle_state_1'])
+  assert.equal(proposed.effects[0].type, 'EVALUATE_READ_BUNDLE')
+
+  const preparedBundle = {
+    mode: 'parallel',
+    bundle: decision.readProbeBundle,
+    prepared: [0, 1].map(index => ({
+      prepared: {
+        intent: { ...action(index), normalizedArguments: {}, redactedDisplay: '{}', intentDigest: 'a'.repeat(64) },
+        decision: { outcome: 'allow' },
+        timeoutMs: 1000,
+        capability: `capability-${index}`
+      }
+    }))
+  }
+  const authorized = reduceSession(proposed.state, { type: 'BUNDLE_POLICY_DECIDED', preparedBundle, effectId: 'effect_bundle_policy_12345' })
+  assert.equal(authorized.state.status, 'executing')
+  assert.deepEqual(authorized.events.filter(event => event.type === 'policy.evaluated').map(event => event.correlationId), ['invocation_bundle_state_0', 'invocation_bundle_state_1'])
+  assert.deepEqual(authorized.events.filter(event => event.type === 'execution.started').map(event => event.correlationId), ['invocation_bundle_state_0', 'invocation_bundle_state_1'])
+  assert.equal(authorized.effects[0].type, 'EXECUTE_READ_BUNDLE')
+})
+
 test('event replay accepts duplicate delivery and detects a sequence gap', () => {
   const now = new Date().toISOString()
   const event = (sequence, eventId = `event_sequence_${sequence}`) => ({

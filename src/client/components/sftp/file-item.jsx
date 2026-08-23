@@ -1083,8 +1083,7 @@ export default class FileSection extends React.Component {
       (
         (hasHost && enableSsh !== false && isRemote) ||
         (isLocal && !hasHost)
-      ) &&
-      !this.props.isFtp
+      )
     ) {
       res.push({
         func: 'gotoFolderInTerminal',
@@ -1098,13 +1097,6 @@ export default class FileSection extends React.Component {
         icon: iconType,
         text: transferText
       })
-      // if (isDirectory && !this.props.isFtp) {
-      //   res.push({
-      //     func: 'zipAndTransfer',
-      //     icon: 'FileZipOutlined',
-      //     text: e('compressAndTransfer')
-      //   })
-      // }
     }
     if (!isDirectory && isRealFile && isLocal) {
       res.push({
@@ -1196,10 +1188,7 @@ export default class FileSection extends React.Component {
       icon: 'ReloadOutlined',
       text: e('refresh')
     })
-    if (
-      this.showModeEdit(type, isRealFile) &&
-      !this.props.isFtp
-    ) {
+    if (this.showModeEdit(type, isRealFile)) {
       res.push({
         func: 'editPermission',
         icon: 'LockOutlined',

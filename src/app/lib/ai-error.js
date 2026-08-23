@@ -4,7 +4,7 @@ function safeAIRequestError (error) {
   const providerMessage = error?.response?.data?.error?.message || error?.message || 'AI request failed'
   const message = String(providerMessage)
     .replace(/\bBearer\s+[^\s,;]+/gi, 'Bearer <redacted>')
-    .replace(/\b(api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|password|secret)\s*[:=]\s*[^\s,;&]+/gi, '$1=<redacted>')
+    .replace(/\b(api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|token|password|secret)\s*[:=]\s*[^\s,;&]+/gi, '$1=<redacted>')
     .replace(/([?&](?:code|key|token|secret|password)=)[^&\s]+/gi, '$1<redacted>')
     .replace(/-----BEGIN [^-]+-----[\s\S]*?-----END [^-]+-----/g, '<redacted-private-key>')
     .slice(0, 500)

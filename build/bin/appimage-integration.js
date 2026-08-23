@@ -45,10 +45,7 @@ function installDesktopFile () {
     'Type=Application',
     'Categories=Development;System;TerminalEmulator;',
     'StartupWMClass=electerm',
-    'MimeType=x-scheme-handler/ssh;x-scheme-handler/telnet;' +
-      'x-scheme-handler/rdp;x-scheme-handler/vnc;' +
-      'x-scheme-handler/serial;x-scheme-handler/spice;' +
-      'x-scheme-handler/electerm;',
+    'MimeType=x-scheme-handler/ssh;x-scheme-handler/electerm;',
     ''
   ].join('\n')
 

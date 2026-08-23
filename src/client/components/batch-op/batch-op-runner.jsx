@@ -81,14 +81,10 @@ export default class BatchOpRunner extends Component {
     this.status = 'running'
 
     const results = []
-    const logsRef = refsStatic.get('batch-op-logs')
-
     for (let i = 0; i < workflows.length; i++) {
       const step = workflows[i]
       this.currentIndex = i
       this.currentStep = step.name
-
-      logsRef?.setLogs(this.getState())
 
       let result
       try {
@@ -99,17 +95,14 @@ export default class BatchOpRunner extends Component {
       } catch (e) {
         console.log(e)
         this.steps.push({ name: step.name, status: 'error', error: e.message })
-        logsRef?.setLogs(this.getState())
         console.error(`Batch op step ${i + 1} failed:`, step.name || 'unnamed', e.message)
         this.status = 'error'
-        logsRef?.setLogs(this.getState())
         throw e
       }
     }
 
     this.status = 'completed'
     this.currentStep = null
-    logsRef?.setLogs(this.getState())
   }
 
   async _executeStep (step, previousResults) {

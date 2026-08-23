@@ -6,7 +6,7 @@ class SshExecAdapter {
     this.bridge = bridge
   }
 
-  execute ({ session, arguments: args, timeoutMs, intent, signal, capability }) {
+  execute ({ session, arguments: args, timeoutMs, intent, signal, capability, progress }) {
     const cwd = session.sessionBinding.cwd === '~' ? '"$HOME"' : shellQuote(session.sessionBinding.cwd)
     return this.bridge.exec({
       session,
@@ -21,7 +21,8 @@ class SshExecAdapter {
         sessionFingerprint: sessionFingerprint(session.sessionBinding),
         policyVersion: session.featurePolicyVersion
       },
-      signal
+      signal,
+      progress
     })
   }
 }

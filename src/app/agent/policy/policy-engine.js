@@ -58,7 +58,7 @@ class PolicyEngine {
       outcome = 'require_approval'
     }
     const allowedApprovalScopes = outcome === 'require_approval'
-      ? (merged.risk === 'R4' ? ['once'] : ['once', 'task_exact_match'])
+      ? (['shell.exec', 'shell.review_exec'].includes(definition.name) || merged.risk === 'R4' ? ['once'] : ['once', 'task_exact_match'])
       : []
     return PolicyDecisionSchema.parse({
       schemaVersion: 1,

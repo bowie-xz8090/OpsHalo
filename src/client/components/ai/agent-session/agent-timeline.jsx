@@ -27,7 +27,6 @@ export default function AgentTimeline ({ timeline, onEvidence, awaitingApproval 
     </section>
   )
 }
-
 function findLastIndex (items, predicate) {
   for (let index = items.length - 1; index >= 0; index--) {
     if (predicate(items[index])) return index

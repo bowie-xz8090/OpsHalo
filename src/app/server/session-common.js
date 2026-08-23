@@ -1,5 +1,5 @@
 /**
- * terminal/sftp/serial class
+ * terminal/SFTP session helpers
  */
 
 const CAPTURE_HEAD_BYTES = 32 * 1024
@@ -84,7 +84,7 @@ exports.commonExtends = function (Cls) {
   // partial output with timedOut: true.
   Cls.prototype.execCommand = function (cmd, options = {}, conn) {
     return new Promise((resolve, reject) => {
-      const { timeoutMs = 0, invocationId } = options || {}
+      const { timeoutMs = 0, invocationId, onChunk } = options || {}
       const client = conn || this.conn || this.client
       if (!client || typeof client.exec !== 'function') {
         reject(new Error('Exec channel not supported for this session type'))
@@ -102,11 +102,18 @@ exports.commonExtends = function (Cls) {
         }
         const stdoutCapture = createBoundedTextCapture()
         const stderrCapture = createBoundedTextCapture()
+        let chunkSequence = 0
+        let firstByteAt
         let exitCode = null
         let settled = false
+        let settleTimer = null
         const done = (timedOut) => {
           if (settled) return
           settled = true
+          if (settleTimer) {
+            clearTimeout(settleTimer)
+            settleTimer = null
+          }
           if (timer) {
             clearTimeout(timer)
             timer = null
@@ -138,14 +145,27 @@ exports.commonExtends = function (Cls) {
         }
         stream.on('data', (data) => {
           stdoutCapture.append(data)
+          const receivedAt = new Date().toISOString()
+          firstByteAt = firstByteAt || receivedAt
+          onChunk?.({ invocationId, stream: 'stdout', sequence: ++chunkSequence, receivedAt, firstByteAt, data: Buffer.from(data).toString('base64'), byteLength: Buffer.byteLength(data) })
         })
         if (stream.stderr) {
           stream.stderr.on('data', (data) => {
             stderrCapture.append(data)
+            const receivedAt = new Date().toISOString()
+            firstByteAt = firstByteAt || receivedAt
+            onChunk?.({ invocationId, stream: 'stderr', sequence: ++chunkSequence, receivedAt, firstByteAt, data: Buffer.from(data).toString('base64'), byteLength: Buffer.byteLength(data) })
           })
         }
         stream.on('exit', (code) => {
           exitCode = typeof code === 'number' ? code : null
+          // Some SSH servers send the exit status but omit channel close.
+          // Keep a short drain window for trailing stdout/stderr before settling.
+          settleTimer = setTimeout(() => done(false), 200)
+        })
+        stream.on('end', () => {
+          if (settled || settleTimer) return
+          settleTimer = setTimeout(() => done(false), 200)
         })
         stream.on('close', () => done(false))
         stream.on('error', (e) => {
@@ -155,6 +175,7 @@ exports.commonExtends = function (Cls) {
           }
           if (!settled) {
             settled = true
+            if (settleTimer) clearTimeout(settleTimer)
             if (invocationId && this._agentExecStreams) this._agentExecStreams.delete(invocationId)
             reject(e)
           }

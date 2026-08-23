@@ -1,5 +1,4 @@
 const terminalStatuses = new Set(['complete', 'inconclusive', 'blocked', 'failed', 'cancelled', 'partial'])
-
 const timelineEventTypes = new Set([
   'action.proposed',
   'policy.evaluated',
@@ -7,6 +6,7 @@ const timelineEventTypes = new Set([
   'approval.resolved',
   'execution.started',
   'execution.progress',
+  'execution.output_progress',
   'execution.finished',
   'observation.ready',
   'verification.started',
@@ -66,6 +66,24 @@ export function failOptimisticAgentSession (session, error) {
     _optimistic: false,
     _projectedAt: Date.now()
   }
+}
+
+export function getAgentStepNumber (session) {
+  const budgetStep = Number(session?.budget?.reactSteps?.used) || 0
+  const timelineStep = (session?.timeline || []).reduce((maximum, item) => (
+    Math.max(maximum, Number(item?.reactStep) || 0)
+  ), 0)
+  return Math.max(1, budgetStep, timelineStep)
+}
+
+export function calculateSmartShellOverlayPadding ({ rows, cursorY, reservedRows, extraBreathing = 2 }) {
+  const terminalRows = Math.max(0, Math.trunc(Number(rows) || 0))
+  const cursorRow = Math.max(0, Math.trunc(Number(cursorY) || 0))
+  const slotRows = Math.max(0, Math.trunc(Number(reservedRows) || 0))
+  const breathingRows = Math.max(0, Math.trunc(Number(extraBreathing) || 0))
+  const spaceBelow = Math.max(0, terminalRows - cursorRow - 1)
+  if (terminalRows < 4 || !slotRows || spaceBelow >= slotRows) return 0
+  return Math.min(slotRows + breathingRows, Math.max(0, terminalRows - 3))
 }
 
 export function projectTimeline (timeline = [], event = {}) {
@@ -128,13 +146,16 @@ export function projectTimeline (timeline = [], event = {}) {
       targetDisplay: payload.targetDisplay || item.targetDisplay
     })
   }
-  if (event.type === 'execution.progress') {
+  if (event.type === 'execution.progress' || event.type === 'execution.output_progress') {
     Object.assign(item, {
       status: 'running',
       progress: {
         elapsedMs: payload.elapsedMs || 0,
         capturedBytes: payload.bytesReceived || 0,
-        safeLastLine: payload.message
+        stdoutBytes: payload.stdoutBytes || 0,
+        stderrBytes: payload.stderrBytes || 0,
+        source: payload.source,
+        safeLastLine: payload.safeLastLine || payload.message
       }
     })
   }

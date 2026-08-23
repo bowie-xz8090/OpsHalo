@@ -22,10 +22,12 @@ const ERROR_CATEGORIES = [
   'cancelled', 'internal_error'
 ]
 const AGENT_EVENT_TYPES = [
-  'session.created', 'session.state_changed', 'session.snapshot',
+  'session.created', 'session.accepted', 'session.state_changed', 'session.snapshot',
+  'provider.session_started', 'provider.phase', 'assistant.delta', 'assistant.completed', 'usage.updated',
   'harness.progress', 'plan.updated', 'budget.updated', 'action.proposed', 'policy.evaluated',
   'approval.requested', 'approval.resolved', 'execution.started',
-  'execution.progress', 'execution.finished', 'observation.ready',
+  'execution.progress', 'execution.output_progress', 'execution.finished', 'observation.ready', 'observation.updated',
+  'knowledge.retrieved',
   'evidence.available', 'evidence.deleted', 'user_input.requested',
   'user_input.resolved', 'verification.started', 'verification.finished',
   'session.paused', 'session.resumed', 'session.completed',

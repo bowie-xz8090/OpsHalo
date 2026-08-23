@@ -34,7 +34,7 @@ class VerificationRunner {
           continue
         }
         const executed = await this.gateway.execute(session, prepared.intent, prepared.capability, signal, prepared.timeoutMs)
-        const observation = await this.observationPipeline.process({ ...session, currentInvocation: { toolName: intent.toolName, isVerification: true } }, executed.result, executed.streams)
+        const observation = await this.observationPipeline.process({ ...session, currentInvocation: { toolName: intent.toolName, isVerification: true } }, executed.result, executed.streams, signal)
         evidenceRefs.push(...observation.evidenceRefs)
         checkResults.push({
           checkId: check.checkId,

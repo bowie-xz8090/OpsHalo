@@ -51,13 +51,4 @@ describe('npm', () => {
       }
     )
   })
-
-  test('should download ftp-srv package with dependencies', async () => {
-    const pkgPath = await downloadPackage('ftp-srv', testFolder)
-    assert.ok(fs.existsSync(pkgPath))
-    assert.ok(fs.existsSync(path.join(pkgPath, 'package.json')))
-    const { FtpSrv } = require(pkgPath)
-    assert.ok(FtpSrv)
-    assert.ok(typeof FtpSrv === 'function')
-  })
 })

@@ -1,4 +1,5 @@
 const path = require('path')
+const { normalizeRuntimeV2Flags } = require('./rollout/feature-rollout')
 
 const SCHEMA_VERSION = 1
 const POLICY_VERSION = 'agent-policy-v1'
@@ -54,10 +55,15 @@ function normalizeAiBackendSelection (config = {}) {
 
 function normalizeFeatureFlags (config = {}) {
   const agentModeEnabled = config.agentModeEnabled === true
+  const runtimeV2 = normalizeRuntimeV2Flags(config)
   return {
+    ...runtimeV2,
     agentModeEnabled,
     agentMutationEnabled: agentModeEnabled && config.agentMutationEnabled === true,
-    agentExternalMcpEnabled: agentModeEnabled && config.agentExternalMcpEnabled === true
+    agentExternalMcpEnabled: agentModeEnabled && config.agentExternalMcpEnabled === true,
+    agentGroundedSynthesisEnabled: agentModeEnabled && runtimeV2.agentGroundedFinalSynthesisV2 && config.agentGroundedSynthesisEnabled !== false,
+    agentSkillsEnabled: agentModeEnabled && runtimeV2.agentSkillsV2 && config.agentSkillsEnabled !== false,
+    agentKnowledgeEnabled: agentModeEnabled && runtimeV2.agentKnowledgeBaseV2 && config.agentKnowledgeEnabled === true
   }
 }
 

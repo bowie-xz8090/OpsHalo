@@ -1,5 +1,5 @@
 /**
- * terminal/sftp/serial class
+ * SFTP session
  */
 const {
   readRemoteFile,

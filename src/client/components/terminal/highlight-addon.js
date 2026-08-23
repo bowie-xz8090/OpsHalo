@@ -144,25 +144,25 @@ export class KeywordHighlighterAddon {
     // Store the original write method properly bound to terminal
     this.originalWrite = terminal.write.bind(terminal)
     const self = this
-    terminal.write = function (data) {
+    terminal.write = function (data, callback) {
       if (typeof data !== 'string') {
-        return self.originalWrite(data)
+        return self.originalWrite(data, callback)
       }
       if (self.containsDcsSequence(data)) {
-        return self.originalWrite(data)
+        return self.originalWrite(data, callback)
       }
       // displayRaw applies to every write regardless of size: raw mode shows
       // escape sequences as text, so skipping escape() for large chunks would
       // let raw ESC bytes be interpreted by xterm instead of displayed.
       if (terminal.displayRaw) {
-        return self.originalWrite(self.escape(data))
+        return self.originalWrite(self.escape(data), callback)
       }
       // Skip keyword highlighting for large writes (command floods, download
       // progress). Highlighting targets interactive command output.
       if (data.length > self.maxHighlightLength) {
-        return self.originalWrite(data)
+        return self.originalWrite(data, callback)
       }
-      self.originalWrite(self.highlightKeywords(data))
+      return self.originalWrite(self.highlightKeywords(data), callback)
     }
   }
 

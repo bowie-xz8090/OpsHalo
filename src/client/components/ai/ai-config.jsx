@@ -5,18 +5,15 @@ import {
   AutoComplete,
   Alert,
   Space,
-  Dropdown,
   Switch,
   Select,
-  Segmented
+  Segmented,
+  InputNumber,
+  Collapse
 } from 'antd'
 import { useEffect, useState } from 'react'
-import { DownOutlined } from '@ant-design/icons'
 import Link from '../common/external-link'
 import AiCache from './ai-cache'
-import {
-  aiConfigWikiLink
-} from '../../common/constants'
 import Password from '../common/password'
 import AiHistory, { addHistoryItem } from './ai-history'
 import message from '../common/message'
@@ -27,7 +24,26 @@ import CodexAccountOverview from './codex-accounts/codex-account-overview'
 const STORAGE_KEY_CONFIG = 'ai_config_history'
 const EVENT_NAME_CONFIG = 'ai-config-history-update'
 
-const e = window.translate
+const AGENT_DEFAULTS = {
+  agentHarnessAdapter: 'openai_compatible',
+  agentGroundedSynthesisEnabled: true,
+  agentFastModel: '',
+  agentMaxContextTokens: 32000,
+  agentMaxOutputTokens: 2048,
+  agentModelTimeoutMs: 30000,
+  agentSynthesisTimeoutMs: 15000,
+  agentStreamingEnabled: true,
+  agentReasoningEffort: 'medium',
+  agentStructuredMode: 'native-tools',
+  agentTemperature: 0.2,
+  agentPromptCacheEnabled: true,
+  agentSkillsEnabled: true,
+  agentSkillDirectories: '',
+  agentKnowledgeEnabled: false,
+  agentKnowledgeSources: '',
+  agentKnowledgeEmbeddingMode: 'off'
+}
+
 const defaultRoles = [
   {
     value: 'Terminal expert, provide commands for different OS, explain usage briefly, use markdown format'
@@ -51,17 +67,30 @@ const authHeaderOptions = [
   { value: 'Authorization' }
 ]
 
+const CAPABILITY_FIELDS = new Set([
+  'aiBackendType', 'baseURLAI', 'apiPathAI', 'modelAI', 'codexProfileId',
+  'agentFastModel', 'agentPlannerModel', 'agentMaxContextTokens', 'agentMaxOutputTokens',
+  'agentModelTimeoutMs', 'agentStreamingEnabled', 'agentStructuredMode',
+  'agentReasoningEffort', 'agentTemperature', 'agentPromptCacheEnabled'
+])
+
 export default function AIConfigForm ({ initialValues, onSubmit, showAIConfig }) {
   const [form] = Form.useForm()
   const [testing, setTesting] = useState(false)
+  const [capabilityReport, setCapabilityReport] = useState(null)
+  const [providerPresetId, setProviderPresetId] = useState('custom')
   const baseURLAI = Form.useWatch('baseURLAI', form)
   const agentModeEnabled = Form.useWatch('agentModeEnabled', form)
   const agentHarnessAdapter = Form.useWatch('agentHarnessAdapter', form)
+  const agentSkillsEnabled = Form.useWatch('agentSkillsEnabled', form)
+  const agentKnowledgeEnabled = Form.useWatch('agentKnowledgeEnabled', form)
   const aiBackendType = Form.useWatch('aiBackendType', form) || initialValues?.aiBackendType || 'openai_compatible'
 
   useEffect(() => {
     if (initialValues) {
-      form.setFieldsValue({ aiBackendType: 'openai_compatible', ...initialValues })
+      const hydrated = { ...AGENT_DEFAULTS, aiBackendType: 'openai_compatible', ...initialValues }
+      form.setFieldsValue(hydrated)
+      setProviderPresetId(detectProviderPreset(hydrated.baseURLAI))
     }
   }, [initialValues])
 
@@ -83,8 +112,14 @@ export default function AIConfigForm ({ initialValues, onSubmit, showAIConfig })
       agentMutationEnabled: values.agentModeEnabled && values.agentMutationEnabled,
       agentExternalMcpEnabled: values.agentModeEnabled && values.agentExternalMcpEnabled
     }
-    onSubmit(normalized)
-    if (normalized.aiBackendType === 'openai_compatible') addHistoryItem(STORAGE_KEY_CONFIG, normalized, EVENT_NAME_CONFIG)
+    try {
+      await onSubmit(normalized)
+      if (normalized.aiBackendType === 'openai_compatible') addHistoryItem(STORAGE_KEY_CONFIG, normalized, EVENT_NAME_CONFIG)
+      return true
+    } catch (error) {
+      message.error(error?.safeMessage || error?.message || 'AI 配置保存失败，请重试')
+      return false
+    }
   }
 
   const handleTest = async () => {
@@ -95,7 +130,23 @@ export default function AIConfigForm ({ initialValues, onSubmit, showAIConfig })
         if (!values.codexProfileId) throw new Error('请先选择并授权一个 Codex 账号')
         const profile = await window.api.codex.refreshAccount({ schemaVersion: 1, profileId: values.codexProfileId })
         if (profile.authState !== 'authenticated') throw new Error('Codex 账号尚未完成授权')
+        if (!await handleSubmit(values)) return
         message.success('Codex Subscription 配置可用')
+        return
+      }
+      if (values.agentModeEnabled) {
+        const report = await window.pre.runGlobalAsync('probeAgentModel', values)
+        setCapabilityReport(report)
+        form.setFieldsValue({
+          agentCapabilityLevel: report.level,
+          agentCapabilityCheckedAt: report.checkedAt,
+          agentCapabilityExpiresAt: report.expiresAt,
+          agentCapabilityProfileHash: report.profileHash
+        })
+        if (report.level === 'automatic') message.success('Agent 模型流式与结构化能力验证通过')
+        else if (report.level === 'limited') message.warning(report.message)
+        else message.error(report.message)
+        if (report.level !== 'unavailable') await handleSubmit({ ...values, agentCapabilityLevel: report.level, agentCapabilityCheckedAt: report.checkedAt, agentCapabilityExpiresAt: report.expiresAt, agentCapabilityProfileHash: report.profileHash })
         return
       }
       const res = await window.pre.runGlobalAsync(
@@ -113,7 +164,7 @@ export default function AIConfigForm ({ initialValues, onSubmit, showAIConfig })
       if (res && res.error) {
         message.error(res.error)
       } else if (res && res.response) {
-        message.success('AI config works!')
+        if (await handleSubmit(values)) message.success('AI config works!')
       } else {
         message.error('Unexpected response from AI API')
       }
@@ -129,6 +180,7 @@ export default function AIConfigForm ({ initialValues, onSubmit, showAIConfig })
   function handleSelectHistory (item) {
     if (item && typeof item === 'object') {
       form.setFieldsValue(item)
+      setProviderPresetId(detectProviderPreset(item.baseURLAI))
     }
   }
 
@@ -143,20 +195,11 @@ export default function AIConfigForm ({ initialValues, onSubmit, showAIConfig })
     form.setFieldsValue(values)
   }
 
-  function renderPresetMenu () {
-    const presets = getAIPresets()
-    const items = presets.map(p => ({
-      key: p.id,
-      label: p.nameAI,
-      onClick: () => handleSelectPreset(p)
-    }))
-    return (
-      <Dropdown menu={{ items }} trigger={['click']}>
-        <Button>
-          {e('presets') || 'Presets'} <DownOutlined />
-        </Button>
-      </Dropdown>
-    )
+  function handleProviderPreset (id) {
+    setProviderPresetId(id)
+    if (id === 'custom') return
+    const preset = getAIPresets().find(item => item.id === id)
+    if (preset) handleSelectPreset(preset)
   }
 
   function renderHistoryItem (item) {
@@ -181,88 +224,104 @@ export default function AIConfigForm ({ initialValues, onSubmit, showAIConfig })
     return 'API Key'
   }
 
+  function renderEndpointFields () {
+    return (
+      <Form.Item label='接口地址' required>
+        <Space.Compact className='width-100'>
+          <Form.Item
+            name='baseURLAI'
+            noStyle
+            rules={[
+              { required: true, message: '请输入接口地址' },
+              { type: 'url', message: '接口地址格式不正确' }
+            ]}
+          >
+            <Input placeholder='https://example.com/v1' style={{ width: '75%' }} />
+          </Form.Item>
+          <Form.Item name='apiPathAI' noStyle rules={[{ required: true, message: '请输入 API 路径' }]}>
+            <Input placeholder='/chat/completions' style={{ width: '25%' }} />
+          </Form.Item>
+        </Space.Compact>
+      </Form.Item>
+    )
+  }
+
+  function renderConnectionAdvanced (defaultLangs) {
+    return (
+      <>
+        <Form.Item label='配置名称（可选）' name='nameAI'>
+          <Input placeholder='例如：公司代理' />
+        </Form.Item>
+        {providerPresetId !== 'custom' && renderEndpointFields()}
+        <Form.Item label='认证请求头' name='authHeaderNameAI'>
+          <AutoComplete options={authHeaderOptions} filterOption={filter}>
+            <Input placeholder='Authorization: Bearer' />
+          </AutoComplete>
+        </Form.Item>
+        <Form.Item label='普通对话角色' name='roleAI' rules={[{ required: true, message: '请输入 AI 角色' }]}>
+          <AutoComplete options={defaultRoles} placement='topLeft'>
+            <Input.TextArea rows={2} />
+          </AutoComplete>
+        </Form.Item>
+        <Form.Item label='回答语言' name='languageAI' rules={[{ required: true, message: '请选择回答语言' }]}>
+          <AutoComplete options={defaultLangs} placement='topLeft'>
+            <Input />
+          </AutoComplete>
+        </Form.Item>
+        <Form.Item label='代理地址（可选）' name='proxyAI'>
+          <AutoComplete options={proxyOptions} filterOption={filter} allowClear>
+            <Input placeholder='socks5://127.0.0.1:1080' />
+          </AutoComplete>
+        </Form.Item>
+      </>
+    )
+  }
+
   if (!showAIConfig) {
     return null
   }
   const defaultLangs = window.store.getLangNames().map(l => ({ value: l }))
   return (
     <>
-      <Alert
-        title={
-          <Link to={aiConfigWikiLink}>WIKI: {aiConfigWikiLink}</Link>
-        }
-        type='info'
-        className='mg2t mg1b'
-      />
-      <Alert
-        title={
-          window.translate('aiWarn')
-        }
-        type='warning'
-        className='mg2b'
-      />
-      {aiBackendType === 'openai_compatible' && (
-        <>
-          <div className='mg1b alignright'>
-            {renderPresetMenu()}
-          </div>
-          <p>Full Url: {baseURLAI}{form.getFieldValue('apiPathAI')}</p>
-        </>
-      )}
       <Form
         form={form}
         onFinish={handleSubmit}
-        initialValues={initialValues}
+        initialValues={{ ...AGENT_DEFAULTS, ...initialValues }}
         layout='vertical'
         className='ai-config-form'
+        onValuesChange={(changed) => {
+          if (!Object.keys(changed).some(key => CAPABILITY_FIELDS.has(key))) return
+          setCapabilityReport(null)
+          form.setFieldsValue({ agentCapabilityLevel: '', agentCapabilityCheckedAt: '', agentCapabilityExpiresAt: '', agentCapabilityProfileHash: '' })
+        }}
       >
-        <Form.Item label='当前 AI 类型' name='aiBackendType' rules={[{ required: true }]}>
+        <Form.Item label='接入方式' name='aiBackendType' rules={[{ required: true }]}>
           <Segmented
             block
             options={[
-              { value: 'openai_compatible', label: 'API Key / OpenAI Compatible' },
-              { value: 'codex_subscription', label: 'ChatGPT / Codex Subscription' }
+              { value: 'openai_compatible', label: 'API Key' },
+              { value: 'codex_subscription', label: 'ChatGPT / Codex 账号' }
             ]}
           />
         </Form.Item>
         {aiBackendType === 'openai_compatible' && (
           <>
-            <Form.Item label='Name' name='nameAI'>
-              <Input placeholder='e.g. DeepSeek Relay, Local Ollama (optional)' />
+            <Form.Item label='AI 服务商'>
+              <Select
+                value={providerPresetId}
+                onChange={handleProviderPreset}
+                options={[
+                  ...getAIPresets().map(item => ({ value: item.id, label: item.nameAI })),
+                  { value: 'custom', label: '自定义 OpenAI 兼容接口' }
+                ]}
+              />
             </Form.Item>
-            <Form.Item label='API URL' required>
-              <Space.Compact className='width-100'>
-                <Form.Item
-                  label='API URL'
-                  name='baseURLAI'
-                  noStyle
-                  rules={[
-                    { required: true, message: 'Please input or select API provider URL!' },
-                    { type: 'url', message: 'Please enter a valid URL!' }
-                  ]}
-                >
-                  <Input
-                    placeholder='Enter API provider URL'
-                    style={{ width: '75%' }}
-                  />
-                </Form.Item>
-                <Form.Item
-                  label='API PATH'
-                  name='apiPathAI'
-                  rules={[
-                    { required: true, message: 'Please input API PATH' }
-                  ]}
-                  noStyle
-                >
-                  <Input
-                    placeholder='/chat/completions'
-                    style={{ width: '25%' }}
-                  />
-                </Form.Item>
-              </Space.Compact>
+            {providerPresetId === 'custom' && renderEndpointFields()}
+            <Form.Item label='模型' name='modelAI' rules={[{ required: true, message: '请输入模型名称' }]}>
+              <Input placeholder='例如 qwen-plus' />
             </Form.Item>
-            <Form.Item label={e('modelAi')} name='modelAI' rules={[{ required: true, message: 'Please input or select a model!' }]}>
-              <Input placeholder='Enter or select AI model' />
+            <Form.Item label={renderApiKeyLabel()} name='apiKeyAI' rules={[{ required: true, message: '请输入 API Key' }]}>
+              <Password placeholder='API Key 仅保存在本机加密存储中' />
             </Form.Item>
           </>
         )}
@@ -280,123 +339,158 @@ export default function AIConfigForm ({ initialValues, onSubmit, showAIConfig })
             </Form.Item>
           </>
         )}
-        <Alert
-          type='info'
-          showIcon
-          className='mg2b'
-          title='实验性 Agent Harness'
-          description='开启 Agent 能力后，可在每个终端标签页选择 Shell模式或 Agent模式；Agent 可自动执行有界低风险只读探查，变更、敏感、网络和交互动作仍由主进程策略确认或阻断。'
-        />
-        <Form.Item label='启用 Agent 能力' name='agentModeEnabled' valuePropName='checked'>
+        <Form.Item label='终端 Agent' name='agentModeEnabled' valuePropName='checked'>
           <Switch />
         </Form.Item>
-        {aiBackendType === 'openai_compatible' && (
-          <>
-            <Form.Item label='Harness 适配器' name='agentHarnessAdapter'>
-              <Select
-                disabled={!agentModeEnabled} options={[
-                  { value: 'openai_compatible', label: 'OpenAI Compatible（推荐）' },
-                  { value: 'strands', label: 'Strands（实验性）', disabled: isDashScopeEndpoint(baseURLAI) },
-                  { value: 'strict_json', label: 'Strict JSON 降级' }
-                ]}
-              />
-            </Form.Item>
-            {isDashScopeEndpoint(baseURLAI) && (
-              <Alert type='info' showIcon className='mg2b' title='DashScope 使用 OpenAI Compatible Harness' description='仍使用当前配置的同一 API 地址、模型和 API Key，仅避开已知不兼容的 Strands 传输路径。' />
-            )}
-          </>
+        <Form.Item name='agentCapabilityLevel' hidden><Input /></Form.Item>
+        <Form.Item name='agentCapabilityCheckedAt' hidden><Input /></Form.Item>
+        <Form.Item name='agentCapabilityExpiresAt' hidden><Input /></Form.Item>
+        <Form.Item name='agentCapabilityProfileHash' hidden><Input /></Form.Item>
+        {capabilityReport && (
+          <Alert
+            type={capabilityReport.level === 'automatic' ? 'success' : capabilityReport.level === 'limited' ? 'warning' : 'error'}
+            showIcon
+            className='mg2b'
+            title={`Agent 状态：${capabilityLevelLabel(capabilityReport.level)}`}
+            description={[
+              capabilityReport.message,
+              Number.isFinite(capabilityReport.firstDeltaMs) ? `首次响应 ${capabilityReport.firstDeltaMs}ms。` : '',
+              ...(capabilityReport.failures || []),
+              ...(capabilityReport.recommendations || [])
+            ].filter(Boolean).join(' ')}
+          />
         )}
-        {aiBackendType === 'codex_subscription' && (
-          <Alert type='success' showIcon className='mg2b' title='Harness：官方 Codex App Server（固定）' description='目标服务器动作仍由 OpsHalo Tool Gateway 检查、审批、执行和验证。' />
-        )}
-        <Form.Item label='允许逐次审批的变更动作' name='agentMutationEnabled' valuePropName='checked'>
+        <Form.Item label='允许执行变更（每次确认）' name='agentMutationEnabled' valuePropName='checked'>
           <Switch disabled={!agentModeEnabled} />
         </Form.Item>
-        <Form.Item label='允许外部 MCP Agent 工具' name='agentExternalMcpEnabled' valuePropName='checked'>
-          <Switch disabled={!agentModeEnabled} />
-        </Form.Item>
-        {aiBackendType === 'openai_compatible' && (
-          <Form.Item label='Strands 失败时回退到同供应商兼容适配器' name='agentCompatibleFallbackEnabled' valuePropName='checked'>
-            <Switch disabled={!agentModeEnabled} />
-          </Form.Item>
-        )}
-
-        {aiBackendType === 'openai_compatible' && (
-          <>
-            <Form.Item
-              label={renderApiKeyLabel()}
-              name='apiKeyAI'
-            >
-              <Password placeholder='Enter your API key' />
-            </Form.Item>
-
-            <Form.Item
-              label='Auth Header'
-              name='authHeaderNameAI'
-              tooltip='Header format for API authentication. e.g. "Authorization: Bearer" sends "Authorization: Bearer <key>", "x-api-key" sends "x-api-key: <key>"'
-            >
-              <AutoComplete
-                options={authHeaderOptions}
-                filterOption={filter}
-              >
-                <Input placeholder='e.g. Authorization: Bearer' />
-              </AutoComplete>
-            </Form.Item>
-
-            <Form.Item
-              label={e('roleAI')}
-              name='roleAI'
-              rules={[{ required: true, message: 'Please input the AI role!' }]}
-            >
-              <AutoComplete options={defaultRoles} placement='topLeft'>
-                <Input.TextArea
-                  placeholder='Enter AI role/system prompt'
-                  rows={1}
-                />
-              </AutoComplete>
-            </Form.Item>
-
-            <Form.Item
-              label={e('language')}
-              name='languageAI'
-              rules={[{ required: true, message: 'Please input language' }]}
-            >
-              <AutoComplete options={defaultLangs} placement='topLeft'>
-                <Input
-                  placeholder={e('language')}
-                />
-              </AutoComplete>
-            </Form.Item>
-
-            <Form.Item
-              label={e('proxy')}
-              name='proxyAI'
-              tooltip='Proxy for AI API requests (e.g., socks5://127.0.0.1:1080)'
-            >
-              <AutoComplete
-                options={proxyOptions}
-                filterOption={filter}
-                allowClear
-              >
-                <Input placeholder='Enter proxy URL (optional)' />
-              </AutoComplete>
-            </Form.Item>
-          </>
-        )}
-
         <Form.Item>
           <Space>
-            <Button type='primary' htmlType='submit'>
-              {e('save')}
-            </Button>
             <Button
+              type='primary'
               loading={testing}
               onClick={handleTest}
             >
-              {e('testConnection')}
+              测试并保存
+            </Button>
+            <Button htmlType='submit'>
+              仅保存
             </Button>
           </Space>
         </Form.Item>
+        <Form.Item name='agentHarnessAdapter' hidden><Input /></Form.Item>
+        <Collapse
+          className='mg2b'
+          items={[
+            {
+              key: 'agent',
+              label: 'Agent 高级设置',
+              children: (
+                <>
+                  <Form.Item label='快速模型（可选）' name='agentFastModel'>
+                    <Input disabled={!agentModeEnabled} placeholder='留空，由规划模型处理短任务' />
+                  </Form.Item>
+                  <Form.Item label='规划模型（可选）' name='agentPlannerModel'>
+                    <Input disabled={!agentModeEnabled} placeholder='留空，使用上面的模型' />
+                  </Form.Item>
+                  <Form.Item label='总结模型（可选）' name='agentSummarizerModel'>
+                    <Input disabled={!agentModeEnabled} placeholder='留空，使用规划模型' />
+                  </Form.Item>
+                  <Space wrap className='width-100 mg1b'>
+                    <Form.Item label='上下文 Tokens' name='agentMaxContextTokens'>
+                      <InputNumber disabled={!agentModeEnabled} min={4096} max={1000000} step={4096} />
+                    </Form.Item>
+                    <Form.Item label='最大输出 Tokens' name='agentMaxOutputTokens'>
+                      <InputNumber disabled={!agentModeEnabled} min={512} max={32768} step={512} />
+                    </Form.Item>
+                    <Form.Item label='规划超时（秒）' name='agentModelTimeoutMs' getValueProps={millisecondsToSeconds} normalize={secondsToMilliseconds}>
+                      <InputNumber disabled={!agentModeEnabled} min={5} max={60} />
+                    </Form.Item>
+                    <Form.Item label='总结超时（秒）' name='agentSynthesisTimeoutMs' getValueProps={millisecondsToSeconds} normalize={secondsToMilliseconds}>
+                      <InputNumber disabled={!agentModeEnabled} min={5} max={60} />
+                    </Form.Item>
+                    <Form.Item label='Temperature' name='agentTemperature'>
+                      <InputNumber disabled={!agentModeEnabled} min={0} max={2} step={0.1} precision={1} />
+                    </Form.Item>
+                  </Space>
+                  <Form.Item label='响应传输' name='agentStreamingEnabled' valuePropName='checked'>
+                    <Switch disabled={!agentModeEnabled} checkedChildren='流式' unCheckedChildren='非流式' />
+                  </Form.Item>
+                  <Form.Item label='结构化模式' name='agentStructuredMode'>
+                    <Select
+                      disabled={!agentModeEnabled}
+                      options={[
+                        { value: 'native-tools', label: '原生工具调用' },
+                        { value: 'json', label: '严格 JSON' }
+                      ]}
+                    />
+                  </Form.Item>
+                  <Form.Item label='推理强度' name='agentReasoningEffort'>
+                    <Select
+                      disabled={!agentModeEnabled}
+                      options={[
+                        { value: 'minimal', label: '最快' },
+                        { value: 'low', label: '较快' },
+                        { value: 'medium', label: '均衡' },
+                        { value: 'high', label: '深入' }
+                      ]}
+                    />
+                  </Form.Item>
+                  <Form.Item label='证据化总结' name='agentGroundedSynthesisEnabled' valuePropName='checked'>
+                    <Switch disabled={!agentModeEnabled} />
+                  </Form.Item>
+                  <Form.Item label='允许 Provider 提示缓存' name='agentPromptCacheEnabled' valuePropName='checked'>
+                    <Switch disabled={!agentModeEnabled} />
+                  </Form.Item>
+                  <Form.Item label='外部 MCP 工具' name='agentExternalMcpEnabled' valuePropName='checked'>
+                    <Switch disabled={!agentModeEnabled} />
+                  </Form.Item>
+                </>
+              )
+            },
+            {
+              key: 'knowledge',
+              label: 'Skills 与本地知识库（可选）',
+              children: (
+                <>
+                  <Form.Item label='启用 Skills' name='agentSkillsEnabled' valuePropName='checked'>
+                    <Switch disabled={!agentModeEnabled} />
+                  </Form.Item>
+                  {agentSkillsEnabled && (
+                    <Form.Item label='自定义 Skill 目录' name='agentSkillDirectories' tooltip='每行一个绝对路径；不填写时仍使用内置运维 Skills。'>
+                      <Input.TextArea disabled={!agentModeEnabled} rows={2} placeholder='/Users/me/.opshalo/skills' />
+                    </Form.Item>
+                  )}
+                  <Form.Item label='启用本地知识库' name='agentKnowledgeEnabled' valuePropName='checked'>
+                    <Switch disabled={!agentModeEnabled} />
+                  </Form.Item>
+                  {agentKnowledgeEnabled && (
+                    <>
+                      <Form.Item label='知识文件或目录' name='agentKnowledgeSources' tooltip='每行一个绝对路径。'>
+                        <Input.TextArea disabled={!agentModeEnabled} rows={3} placeholder='/Users/me/runbooks' />
+                      </Form.Item>
+                      <Form.Item label='检索方式' name='agentKnowledgeEmbeddingMode'>
+                        <Segmented
+                          disabled={!agentModeEnabled}
+                          options={[
+                            { value: 'off', label: '全文检索' },
+                            { value: 'local', label: '本地混合检索' }
+                          ]}
+                        />
+                      </Form.Item>
+                    </>
+                  )}
+                </>
+              )
+            },
+            ...(aiBackendType === 'openai_compatible'
+              ? [{
+                  key: 'connection',
+                  label: '连接高级设置',
+                  children: renderConnectionAdvanced(defaultLangs)
+                }]
+              : [])
+          ]}
+        />
       </Form>
       {aiBackendType === 'openai_compatible' && (
         <>
@@ -419,4 +513,26 @@ function isDashScopeEndpoint (value) {
   } catch (_) {
     return false
   }
+}
+
+function detectProviderPreset (baseURL) {
+  const normalized = String(baseURL || '').replace(/\/+$/, '')
+  const matched = getAIPresets().find(item => String(item.baseURLAI || '').replace(/\/+$/, '') === normalized)
+  return matched?.id || 'custom'
+}
+
+function capabilityLevelLabel (level) {
+  if (level === 'automatic') return '可自动执行'
+  if (level === 'limited') return '仅建议模式'
+  return '不可用'
+}
+
+function millisecondsToSeconds (value) {
+  const milliseconds = Number(value)
+  return { value: Number.isFinite(milliseconds) ? Math.round(milliseconds / 1000) : undefined }
+}
+
+function secondsToMilliseconds (value) {
+  const seconds = Number(value)
+  return Number.isFinite(seconds) ? Math.round(seconds * 1000) : undefined
 }

@@ -42,6 +42,8 @@ class CodexAppServerManager extends EventEmitter {
     this.clientBindings = new Map()
     this.pendingLogins = new Map()
     this.activeTurns = new Map()
+    this.taskThreads = new Map()
+    this.accountCache = new Map()
   }
 
   listAccounts () {
@@ -246,22 +248,20 @@ class CodexAppServerManager extends EventEmitter {
     progress('connecting', '正在连接 Codex App Server…')
     const client = await this.clientFor(profileId)
     progress('authenticating', '正在确认 Codex 账号状态…')
-    const account = await client.request('account/read', { refreshToken: false }, { timeoutMs: 15000 })
+    const account = await this.readCachedAccount(profileId, client)
     if (account?.account?.type !== 'chatgpt') throw managerError('CODEX_AUTH_REQUIRED', 'Codex 账号尚未授权或登录已失效，请重新授权。')
     const paths = this.profileStore.ensureProfileDirectories(profileId)
-    progress('preparing', '正在准备隔离的 AI 规划线程…')
-    const threadResult = await client.request('thread/start', {
-      cwd: paths.runtime,
-      ephemeral: true,
-      approvalPolicy: 'untrusted',
-      sandbox: 'read-only',
-      baseInstructions: PLANNING_ONLY_INSTRUCTIONS,
-      developerInstructions: PLANNING_ONLY_INSTRUCTIONS,
-      config: PLANNING_ONLY_CONFIG,
-      serviceName: 'OpsHalo'
-    }, { timeoutMs: 30000 })
-    const threadId = threadResult?.thread?.id
-    if (!threadId) throw managerError('CODEX_THREAD_START_FAILED', 'Codex App Server 未能创建规划线程。')
+    const configured = this.getConfig()
+    const existingThread = this.taskThreads.get(input.taskId)
+    progress('preparing', existingThread ? '正在复用当前任务的 AI 规划线程…' : '正在准备隔离的 AI 规划线程…')
+    const threadId = existingThread?.threadId || await this.startTaskThread({
+      client,
+      profileId,
+      taskId: input.taskId,
+      paths,
+      model: configured.agentPlannerModel || configured.codexModelAI,
+      reasoningEffort: configured.agentReasoningEffort
+    })
     const prompt = `${buildPrompt(input, { includeOutputSchema: false })}\n\n<CODEX_OUTPUT_MAPPING>\n${CODEX_OUTPUT_MAPPING_INSTRUCTIONS}\n</CODEX_OUTPUT_MAPPING>`
     const deltas = []
     const completedItems = []
@@ -350,6 +350,43 @@ class CodexAppServerManager extends EventEmitter {
     await active.client.interrupt(active.threadId, active.turnId)
   }
 
+  releaseTaskSession (taskId) {
+    this.taskThreads.delete(taskId)
+  }
+
+  async readCachedAccount (profileId, client) {
+    const cached = this.accountCache.get(profileId)
+    if (cached && Date.now() - cached.readAt < 5 * 60 * 1000) return cached.value
+    const value = await client.request('account/read', { refreshToken: false }, { timeoutMs: 15000 })
+    this.accountCache.set(profileId, { readAt: Date.now(), value })
+    return value
+  }
+
+  async startTaskThread ({ client, profileId, taskId, paths, model, reasoningEffort }) {
+    const config = {
+      ...PLANNING_ONLY_CONFIG,
+      features: { ...PLANNING_ONLY_CONFIG.features },
+      apps: { _default: { ...PLANNING_ONLY_CONFIG.apps._default } }
+    }
+    if (reasoningEffort) config.model_reasoning_effort = reasoningEffort
+    const params = {
+      cwd: paths.runtime,
+      ephemeral: true,
+      approvalPolicy: 'untrusted',
+      sandbox: 'read-only',
+      baseInstructions: PLANNING_ONLY_INSTRUCTIONS,
+      developerInstructions: PLANNING_ONLY_INSTRUCTIONS,
+      config,
+      serviceName: 'OpsHalo'
+    }
+    if (model) params.model = model
+    const threadResult = await client.request('thread/start', params, { timeoutMs: 30000 })
+    const threadId = threadResult?.thread?.id
+    if (!threadId) throw managerError('CODEX_THREAD_START_FAILED', 'Codex App Server 未能创建规划线程。')
+    this.taskThreads.set(taskId, { profileId, threadId, client, createdAt: Date.now() })
+    return threadId
+  }
+
   recordSecurityEvent (profileId, event) {
     this.audit?.append('codex_app_server_security', { profileId, ...event })
     this.emit('securityEvent', { profileId, ...event })
@@ -365,6 +402,8 @@ class CodexAppServerManager extends EventEmitter {
     entries.forEach(([profileId]) => this.unbindClient(profileId))
     this.clients.clear()
     this.activeTurns.clear()
+    this.taskThreads.clear()
+    this.accountCache.clear()
     this.pendingLogins.clear()
     await Promise.allSettled(clients.map(client => client.dispose()))
   }

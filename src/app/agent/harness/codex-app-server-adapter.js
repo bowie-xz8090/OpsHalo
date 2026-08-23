@@ -7,6 +7,7 @@ class CodexAppServerHarnessAdapter extends AgentHarness {
     this.profileId = options.profileId
     this.maxContextTokens = options.maxContextTokens || 32000
     this.activeTaskId = null
+    this.taskId = null
     this.disposed = false
   }
 
@@ -16,6 +17,7 @@ class CodexAppServerHarnessAdapter extends AgentHarness {
 
   async * runTurn (input, signal) {
     if (this.disposed) throw adapterError('CODEX_ADAPTER_DISPOSED', 'Codex Harness 已关闭。')
+    this.taskId = input.taskId
     this.activeTaskId = input.taskId
     try {
       const statuses = []
@@ -37,7 +39,7 @@ class CodexAppServerHarnessAdapter extends AgentHarness {
       while (true) {
         if (statuses.length) {
           const status = statuses.shift()
-          yield { type: 'status', phase: status.phase, message: status.message }
+          yield { type: 'phase', phase: status.phase, safeMessage: status.message }
           continue
         }
         if (settled) break
@@ -47,7 +49,7 @@ class CodexAppServerHarnessAdapter extends AgentHarness {
       await turn
       if (failure) throw failure
       if (result.usage) yield { type: 'usage', ...result.usage }
-      yield { type: 'decision', decision: result.decision }
+      yield { type: 'decision.completed', decision: result.decision }
     } finally {
       this.activeTaskId = null
     }
@@ -56,6 +58,8 @@ class CodexAppServerHarnessAdapter extends AgentHarness {
   async dispose () {
     this.disposed = true
     if (this.activeTaskId) await this.manager.interruptTask(this.activeTaskId).catch(() => {})
+    if (this.taskId) this.manager.releaseTaskSession?.(this.taskId)
+    this.taskId = null
   }
 }
 

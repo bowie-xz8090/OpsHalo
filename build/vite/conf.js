@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { cwd, version } from './common.js'
-import { resolve, normalize } from 'path'
+import { resolve } from 'path'
 import def from './def.js'
 
 function buildInput () {
@@ -25,43 +25,8 @@ function replaceWebAppPlugin () {
   }
 }
 
-const emptyComponent = resolve(cwd, './empty-component.jsx')
-const emptyModule = resolve(cwd, './empty-module.js')
-
-/** Mini: stub RDP/VNC/Spice/Web/noVNC/ironrdp so they are not shipped */
-function miniStubPlugin () {
-  const patterns = [
-    /[/\\]rdp[/\\]rdp-session/,
-    /[/\\]vnc[/\\]vnc-session/,
-    /[/\\]spice[/\\]spice-session/,
-    /[/\\]web[/\\]web-session/,
-    /[/\\]rdp[/\\]resolution-edit/,
-    /ironrdp-wasm/,
-    /@novnc[/\\]novnc/,
-    /spice-client/
-  ]
-  return {
-    name: 'mini-stub-heavy-sessions',
-    enforce: 'pre',
-    resolveId (id, importer) {
-      const abs = id.startsWith('.') && importer
-        ? normalize(resolve(importer, '..', id))
-        : id
-      const hit = patterns.some(re => re.test(id) || re.test(abs))
-      if (!hit) {
-        return null
-      }
-      if (/ironrdp-wasm|@novnc|spice-client/.test(id) || /ironrdp-wasm|novnc|spice-client/.test(abs)) {
-        return emptyModule
-      }
-      return emptyComponent
-    }
-  }
-}
-
 export default defineConfig({
   plugins: [
-    miniStubPlugin(),
     react({ include: /\.(mdx|js|jsx|ts|tsx|mjs)$/ }),
     replaceWebAppPlugin()
   ],
@@ -70,9 +35,6 @@ export default defineConfig({
       'node:diagnostics_channel': resolve(cwd, './diagnostics-channel-stub.js'),
       diagnostics_channel: resolve(cwd, './diagnostics-channel-stub.js')
     }
-  },
-  optimizeDeps: {
-    exclude: ['ironrdp-wasm']
   },
   define: def,
   publicDir: false,

@@ -4,7 +4,7 @@
 # Strategy:
 # 1. Build x64 version with legacy deps to get the asar
 # 2. Download electron loong64 (old-world) from msojocs GitHub mirror
-# 3. Cross-compile native modules for loong64 (node-pty@0.10.1, serialport@10.5.0)
+# 3. Cross-compile node-pty for loong64
 # 4. Merge x64 asar with loong64 electron and native modules
 # 5. Upload tar.gz to GitHub release draft
 # 6. Build deb package and upload to GitHub release draft
@@ -31,7 +31,6 @@ WORKFLOW_NAME="${WORKFLOW_NAME:-linux-loong64-legacy}"
 
 # Legacy native module versions
 NODE_PTY_VERSION="1.1.0"
-SERIALPORT_VERSION="10.5.0"
 
 # GCC 8 (old-world ABI, installed by workflow from loongson-community mirror)
 GCC8_PREFIX="${GCC8_PREFIX:-/opt/gcc8-loong64}"
@@ -230,7 +229,7 @@ rebuild_native_modules() {
     fi
 
     log_info "Step 3: Cross-compiling native modules for loong64 (legacy deps)..."
-    log_info "  node-pty@${NODE_PTY_VERSION}, serialport@${SERIALPORT_VERSION}"
+    log_info "  node-pty@${NODE_PTY_VERSION}"
 
     local native_modules_dir="$WORK_DIR/native-modules-loong64"
     mkdir -p "$native_modules_dir"
@@ -271,20 +270,6 @@ rebuild_native_modules() {
         log_info "Undefined symbols:"
         readelf -s "$f" 2>/dev/null | grep "UND" | grep -v "UND$" | head -20 || true
         cp "$f" "$native_modules_dir/node-pty.node"
-    done
-    cd "$cross_build_dir"
-
-    # Build @serialport/bindings-cpp (legacy serialport@10.5.0)
-    log_info "Building serialport@${SERIALPORT_VERSION} bindings for loong64..."
-    mkdir -p build-serialport && cd build-serialport
-    npm init -y 2>/dev/null
-    npm_config_nodedir="$headers_dir" npm_config_arch=loong64 npm_config_target_arch=loong64 CC=loongarch64-linux-gnu-gcc CXX=loongarch64-linux-gnu-g++ npm install @serialport/bindings-cpp --build-from-source 2>&1 | tee /tmp/serialport-build.log | tail -30
-    find . -path "*/build/Release/bindings.node" -type f | while read f; do
-        log_info "Found bindings.node: $f"
-        file "$f"
-        log_info "ELF headers:"
-        readelf -h "$f" 2>/dev/null | grep -E "Machine|Class" || true
-        cp "$f" "$native_modules_dir/serialport-bindings.node"
     done
     cd "$cross_build_dir"
 
@@ -361,9 +346,6 @@ merge_loong64() {
         log_info "Replacing native modules with loong64 versions..."
         if [ -f "$native_modules_dir/node-pty.node" ]; then
             find "$output_dir" -path "*/node-pty/build/Release/*.node" -exec cp "$native_modules_dir/node-pty.node" {} \; 2>/dev/null || true
-        fi
-        if [ -f "$native_modules_dir/serialport-bindings.node" ]; then
-            find "$output_dir" -path "*@serialport/bindings-cpp*" -name "*.node" -exec cp "$native_modules_dir/serialport-bindings.node" {} \; 2>/dev/null || true
         fi
         if [ -f "$native_modules_dir/ssh2-crypto.node" ]; then
             find "$output_dir" -path "*@electerm/ssh2*" -name "*.node" -exec cp "$native_modules_dir/ssh2-crypto.node" {} \; 2>/dev/null || true
@@ -458,7 +440,7 @@ Terminal=false
 Type=Application
 Categories=Development;System;TerminalEmulator;
 StartupWMClass=electerm
-MimeType=x-scheme-handler/ssh;x-scheme-handler/telnet;x-scheme-handler/rdp;x-scheme-handler/vnc;x-scheme-handler/serial;x-scheme-handler/spice;x-scheme-handler/electerm;
+MimeType=x-scheme-handler/ssh;x-scheme-handler/electerm;
 DESKTOP
 
     cat > "$deb_dir/DEBIAN/control" <<CTRL
@@ -469,7 +451,7 @@ Priority: optional
 Architecture: ${deb_arch}
 Depends: libglib2.0-0, libnss3, libnspr4, libdbus-1-3, libatk1.0-0, libatk-bridge2.0-0, libcups2, libcairo2, libpango-1.0-0, libx11-6, libxcomposite1, libxdamage1, libxext6, libxfixes3, libxrandr2, libxkbcommon0, libdrm2, libgbm1, libatspi2.0-0, libpulse0, libgtk-3-0
 Maintainer: ZHAO Xudong <zxdong@gmail.com>
-Description: Open-sourced terminal/ssh/sftp/telnet/serialport/RDP/VNC/Spice/ftp client
+Description: OpsHalo AI-powered SSH/SFTP operations workbench
 CTRL
 
     cat > "$deb_dir/DEBIAN/postinst" <<'POSTINST'
@@ -546,7 +528,7 @@ main() {
     log_info "Work directory: $WORK_DIR"
     log_info "Output directory: $OUTPUT_DIR"
     log_info "Electron version: $ELECTRON_VERSION"
-    log_info "node-pty: $NODE_PTY_VERSION, serialport: $SERIALPORT_VERSION"
+    log_info "node-pty: $NODE_PTY_VERSION"
 
     rm -rf "$WORK_DIR"
     mkdir -p "$WORK_DIR"

@@ -1,5 +1,5 @@
 /**
- * terminal/sftp/serial class
+ * terminal session base
  */
 const generate = require('../common/uid')
 const { createLogFileName } = require('../common/create-session-log-file-path')
@@ -7,7 +7,6 @@ const SessionLog = require('./session-log')
 const time = require('../common/time.js')
 const globalState = require('./global-state')
 
-// const { MockBinding } = require('@serialport/binding-mock')
 // MockBinding.createPort('/dev/ROBOT', { echo: true, record: true })
 
 function createVtParser (cols = 4096) {
@@ -120,7 +119,7 @@ class TerminalBase {
       return
     }
     // Normalize bare \r (carriage return, not part of \r\n) to \r\n.
-    // Embedded devices (UART/telnet) often use \r-only line endings which
+    // Some remote shells use \r-only line endings which
     // don't trigger xterm's onLineFeed, causing timestamps to be missing
     // for every line except the first.
     if (Buffer.isBuffer(data)) {

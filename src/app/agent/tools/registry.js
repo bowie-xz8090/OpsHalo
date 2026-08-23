@@ -43,6 +43,7 @@ class ToolRegistry {
       maxTimeoutMs: Math.min(metadata.maxTimeoutMs || 60000, 120000),
       maxRawCaptureBytes: Math.min(metadata.maxRawCaptureBytes || 2 * 1024 * 1024, 2 * 1024 * 1024),
       maxModelOutputBytes: Math.min(metadata.maxModelOutputBytes || 6144, 8192),
+      parallelSafe: false,
       supportsCancel: metadata.supportsCancel === true,
       supportsDryRun: metadata.supportsDryRun === true,
       inputSchema: inputSchema || { type: 'object', additionalProperties: false },
@@ -79,6 +80,7 @@ class ToolRegistry {
       riskFloor: definition.riskFloor,
       sensitivityFloor: definition.sensitivityFloor,
       costFloor: definition.costFloor,
+      parallelSafe: definition.parallelSafe,
       verificationRequired: definition.mutability !== 'none' && definition.category !== 'interactive',
       inputSchema: definition.inputSchema,
       publicBounds: [

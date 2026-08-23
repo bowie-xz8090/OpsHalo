@@ -12,7 +12,6 @@ import {
   rightSidebarWidthKey,
   addPanelWidthLsKey,
   dismissDelKeyTipLsKey,
-  connectionMap,
   lastAiChatSessionIdKey,
   mobileBreakpoint,
   splitMap
@@ -177,10 +176,6 @@ export default Store => {
     })
   }
 
-  Store.prototype.toggleResolutionEdit = function () {
-    window.store.openResolutionEdit = !window.store.openResolutionEdit
-  }
-
   Store.prototype.setTerminalInfos = function (arr) {
     window.store.setConfig({
       terminalInfos: arr
@@ -190,7 +185,6 @@ export default Store => {
   Store.prototype.applyProfile = function (tab) {
     const {
       profile,
-      type,
       authType
     } = tab
     if (!profile || authType !== 'profiles') {
@@ -206,25 +200,6 @@ export default Store => {
     // delete tab.passphrase
     delete p.name
     delete p.id
-    if (type === connectionMap.rdp) {
-      const filtered = pickBy(p.rdp, (value) => value !== undefined && value !== '')
-      return {
-        ...tab,
-        ...filtered
-      }
-    } else if (type === connectionMap.vnc) {
-      const filtered = pickBy(p.vnc, (value) => value !== undefined && value !== '')
-      return {
-        ...tab,
-        ...filtered
-      }
-    } else if (type === connectionMap.telnet) {
-      const filtered = pickBy(p.telnet, (value) => value !== undefined && value !== '')
-      return {
-        ...tab,
-        ...filtered
-      }
-    }
     delete p.rdp
     delete p.vnc
     delete p.telnet

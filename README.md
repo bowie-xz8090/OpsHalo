@@ -14,6 +14,8 @@ OpsHalo is an AI-powered SSH/SFTP operations workbench for investigating and ope
 - Changes, sensitive commands, network actions, and interactive operations require explicit approval.
 - Output redaction, truncation, local evidence, timeouts, loop budgets, Ctrl+C cancellation, and post-change verification.
 - Mutually exclusive OpenAI-compatible API Key and ChatGPT/Codex Subscription backends.
+- Role-based model profiles, capability probes, bounded Skills, and explicit local knowledge with source citations.
+- Provider streaming, real command-output progress, persistent task sessions, and evidence-grounded final synthesis behind ordered rollback flags.
 
 ## Agent workflow
 
