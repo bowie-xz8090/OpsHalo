@@ -18,6 +18,7 @@ OpsHalo 已有 Agent Harness、安全网关、审批、证据和验证骨架，�
 - 新增 Agent 评测套件，覆盖首个可见反馈、首个 Provider 增量、首个真实执行输出、模型调用次数、任务完成质量、安全回归和真实 Provider + SSH smoke。
 - 增强终端输入路由和会话面板：支持明确的 Agent 模式及 `Shift+Enter` 强制自然语言提交，实时展示安全文本、动作和证据状态。
 - 收敛 Mini 发行物的产品边界：只保留前端实际可达的 SSH/SFTP、本地终端、AI、主题、同步与工作区能力；对不可达的遗留会话、组件、服务端实现、依赖和测试先做可达性审计，再成组删除。
+- 从 1.0.26 起不再把 Codex 原生运行时放入安装包；用户显式开始 Codex OAuth 或设备码授权时，主进程从固定官方清单按需下载、校验并原子安装对应平台运行时。
 
 ## Capabilities
 
@@ -28,6 +29,7 @@ OpsHalo 已有 Agent Harness、安全网关、审批、证据和验证骨架，�
 - `agent-model-profiles`: 定义模型角色、Provider 能力探测、配置契约、兼容等级和安全降级。
 - `agent-skills-knowledge`: 定义 Skills、本地知识库、检索来源、隐私和 Tool Gateway 边界。
 - `agent-runtime-evaluation`: 定义延迟、质量、安全、成本和真实环境验收门槛。
+- `codex-on-demand-runtime`: 定义固定版本运行时清单、安全下载、校验安装、账号状态保持、Renderer 状态接口和发行物瘦身门禁。
 
 ### Modified Capabilities
 
@@ -77,6 +79,7 @@ OpsHalo 已有 Agent Harness、安全网关、审批、证据和验证骨架，�
 - Skills 和本地知识检索不能绕过工具策略、审批、脱敏、上下文预算或单主机绑定。
 - 评测集至少覆盖 30 个确定性场景、10 个失败/取消场景和每个正式支持 Provider 的只读真实 smoke；任何安全回归阻止灰度扩大。
 - Mini 发行物不得再导入或打包 Telnet、Serial、FTP、RDP、VNC、SPICE、Web 等无前端入口的会话实现及其专用依赖；保留的共享模块必须有明确的可达消费者和自动化测试。
+- 安装包不得包含 `@openai/codex*` 或 Codex 原生二进制；Codex Subscription 首次授权可在配置页明确下载固定运行时，OpenAI Compatible 模式不触发下载。
 
 ## Impact
 
@@ -86,3 +89,4 @@ OpsHalo 已有 Agent Harness、安全网关、审批、证据和验证骨架，�
 - 可选 embedding/rerank 能力必须按显式设置启用；默认知识检索可使用本地全文索引，不要求新增云服务。
 - 实施时需要评估 Chaterm 许可证边界并记录 clean-room 设计来源；不得复制 GPL 文件、提示词或协议实现。
 - Mini 产品面清理将删除不可达的会话 Renderer、Session Server、表单、构建 stub、专用依赖和仅验证已移除能力的测试，并增加旧数据加载与发行物依赖审计。
+- Codex Subscription 增加主进程运行时管理器、受限 IPC 和配置页下载状态；运行时缓存与账号目录分离，失败或取消不得清除账号、当前选择或 Agent 开关。

@@ -1,7 +1,7 @@
-const { app, BrowserWindow, ipcMain, shell } = require('electron')
+const { app, BrowserWindow, ipcMain, net, shell } = require('electron')
 const path = require('path')
 const globalState = require('../lib/glob-state')
-const { runtimeRoot, codexAccountsRoot, normalizeFeatureFlags } = require('./config')
+const { runtimeRoot, codexAccountsRoot, codexRuntimeRoot, normalizeFeatureFlags } = require('./config')
 const { SessionStore } = require('./session/session-store')
 const { EvidenceStore } = require('./evidence/evidence-store')
 const { EvidenceCleaner } = require('./evidence/evidence-cleaner')
@@ -31,6 +31,7 @@ const { registerAgentIpc } = require('./ipc/register-agent-ipc')
 const { registerCodexIpc } = require('./ipc/register-codex-ipc')
 const { CodexProfileStore } = require('./providers/codex-profile-store')
 const { CodexAppServerManager } = require('./providers/codex-app-server-manager')
+const { CodexRuntimeManager } = require('./providers/codex-runtime-manager')
 const { packInfo } = require('../common/runtime-constants')
 const { SkillRegistry } = require('./knowledge/skill-registry')
 const { LocalKnowledgeBase } = require('./knowledge/local-knowledge-base')
@@ -76,8 +77,14 @@ function initAgentRuntime () {
   const knowledgeBase = new LocalKnowledgeBase({ root: path.join(root, 'knowledge'), config, redactor: new SecretRedactor(config.agentSensitivePatterns || []) })
   const verificationRunner = new VerificationRunner(gateway, observationPipeline)
   const profileStore = new CodexProfileStore(codexAccountsRoot(app.getPath('userData')))
+  const codexRuntimeManager = new CodexRuntimeManager({
+    root: codexRuntimeRoot(app.getPath('userData')),
+    getConfig: () => globalState.get('config') || {},
+    fetchImpl: (url, options) => net.fetch(url, options)
+  })
   const codexManager = new CodexAppServerManager({
     profileStore,
+    runtimeManager: codexRuntimeManager,
     getConfig: () => globalState.get('config') || {},
     audit,
     version: packInfo.version,
@@ -119,13 +126,19 @@ function initAgentRuntime () {
   })
   flushPendingConfig = configRefresher.flush
   const unregisterIpc = registerAgentIpc({ ipcMain, manager, evidenceStore })
-  const unregisterCodexIpc = registerCodexIpc({ ipcMain, manager: codexManager, openExternal: url => shell.openExternal(url) })
+  const unregisterCodexIpc = registerCodexIpc({ ipcMain, manager: codexManager, runtimeManager: codexRuntimeManager, openExternal: url => shell.openExternal(url) })
   const publishAccountEvent = event => {
     for (const win of BrowserWindow.getAllWindows()) {
       if (!win.isDestroyed()) win.webContents.send('codex:account-event', event)
     }
   }
   codexManager.on('accountEvent', publishAccountEvent)
+  const publishRuntimeEvent = event => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send('codex:runtime-event', event)
+    }
+  }
+  codexRuntimeManager.on('runtimeEvent', publishRuntimeEvent)
   const disposeOnQuit = () => instance?.dispose()
   app.once('before-quit', disposeOnQuit)
   const recovered = manager.recover()
@@ -143,6 +156,7 @@ function initAgentRuntime () {
     manager,
     profileStore,
     codexManager,
+    codexRuntimeManager,
     skillRegistry,
     knowledgeBase,
     recovered,
@@ -153,6 +167,7 @@ function initAgentRuntime () {
       unregisterIpc()
       unregisterCodexIpc()
       codexManager.removeListener('accountEvent', publishAccountEvent)
+      codexRuntimeManager.removeListener('runtimeEvent', publishRuntimeEvent)
       manager.dispose().catch(() => {})
       codexManager.dispose().catch(() => {})
       evidenceCleaner.stop()

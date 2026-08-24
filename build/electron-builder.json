@@ -10,9 +10,6 @@
     "en-US"
   ],
   "asar": true,
-  "asarUnpack": [
-    "node_modules/@openai/codex-*/vendor/**"
-  ],
   "compression": "maximum",
   "afterPack": "./build/bin/after-pack.js",
   "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",

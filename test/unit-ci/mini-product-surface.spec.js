@@ -6,6 +6,7 @@ const { pathToFileURL } = require('node:url')
 
 const root = path.resolve(__dirname, '../..')
 const removedDependencies = [
+  '@openai/codex',
   '@electerm/ftp-srv',
   '@novnc/novnc',
   'basic-ftp',
@@ -73,6 +74,14 @@ test('packaged OpsHalo removes the Electron default app fallback', () => {
   const afterPack = fs.readFileSync(path.resolve(__dirname, '../../build/bin/after-pack.js'), 'utf8')
   assert.match(afterPack, /default_app\.asar/)
   assert.match(afterPack, /unlinkSync\(defaultApp\)/)
+  assert.match(afterPack, /assertNoCodexRuntime\(resourcesDir\)/)
+})
+
+test('release artifact scan rejects Codex packages and native executables only', () => {
+  const { isForbiddenCodexPath } = require('../../build/bin/verify-mini-artifact')
+  assert.equal(isForbiddenCodexPath('/node_modules/@openai/codex-darwin-arm64/vendor/bin/codex'), true)
+  assert.equal(isForbiddenCodexPath('app.asar.unpacked/vendor/codex.exe'), true)
+  assert.equal(isForbiddenCodexPath('agent/providers/codex-runtime-manager.js'), false)
 })
 
 test('Mini deep links register only SSH and the internal app protocol', () => {

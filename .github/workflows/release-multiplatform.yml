@@ -65,8 +65,14 @@ jobs:
           npm install --legacy-peer-deps
           npm install --save-exact node-pty@1.1.0-beta14 serialport@13.0.0
 
+      - name: Verify pinned Codex runtime download and App Server initialization
+        run: npm run verify-codex-runtime
+
       - name: Prepare packaged application
         run: npm run b
+
+      - name: Verify packaged application excludes Codex runtime
+        run: npm run verify-mini-artifact
 
       - name: Prepare electron-builder configuration
         run: npm run pb
@@ -80,6 +86,9 @@ jobs:
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: npx electron-builder --win nsis tar.gz --x64 --publish never
+
+      - name: Enforce Windows release size limits
+        run: npm run verify-release-size -- dist
 
       - uses: actions/upload-artifact@v4
         with:
@@ -113,8 +122,14 @@ jobs:
           npm install --global yarn
           npm ci --legacy-peer-deps
 
+      - name: Verify pinned Codex runtime download and App Server initialization
+        run: npm run verify-codex-runtime
+
       - name: Prepare packaged application
         run: npm run b
+
+      - name: Verify packaged application excludes Codex runtime
+        run: npm run verify-mini-artifact
 
       - name: Prepare electron-builder configuration
         run: npm run pb
@@ -127,6 +142,9 @@ jobs:
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: npx electron-builder --mac dmg --arm64 --publish never
+
+      - name: Enforce macOS release size limit
+        run: npm run verify-release-size -- dist
 
       - uses: actions/upload-artifact@v4
         with:
@@ -158,8 +176,14 @@ jobs:
           npm install --global yarn
           npm ci --legacy-peer-deps
 
+      - name: Verify pinned Codex runtime download and App Server initialization
+        run: npm run verify-codex-runtime
+
       - name: Prepare packaged application
         run: npm run b
+
+      - name: Verify packaged application excludes Codex runtime
+        run: npm run verify-mini-artifact
 
       - name: Prepare electron-builder configuration
         run: npm run pb
@@ -172,6 +196,9 @@ jobs:
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: npx electron-builder --mac dmg --x64 --publish never
+
+      - name: Enforce macOS release size limit
+        run: npm run verify-release-size -- dist
 
       - uses: actions/upload-artifact@v4
         with:
@@ -195,13 +222,19 @@ jobs:
       - name: Install packaging dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install --yes rpm
+          sudo apt-get install --yes rpm xvfb
           npm config set legacy-peer-deps true
           npm install --global yarn
           npm ci --legacy-peer-deps
 
+      - name: Verify pinned Codex runtime download and App Server initialization
+        run: xvfb-run -a npm run verify-codex-runtime
+
       - name: Prepare packaged application
         run: npm run b
+
+      - name: Verify packaged application excludes Codex runtime
+        run: npm run verify-mini-artifact
 
       - name: Prepare electron-builder configuration
         run: npm run pb
@@ -210,6 +243,9 @@ jobs:
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: npx electron-builder --linux deb rpm AppImage tar.gz --x64 --publish never
+
+      - name: Enforce Linux release size limits
+        run: npm run verify-release-size -- dist
 
       - uses: actions/upload-artifact@v4
         with:
@@ -231,6 +267,8 @@ jobs:
       - build-linux-x64
     runs-on: ubuntu-24.04
     steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
           pattern: release-*
@@ -240,6 +278,9 @@ jobs:
       - name: Generate SHA-256 checksums
         working-directory: release-assets
         run: sha256sum * > SHA256SUMS.txt
+
+      - name: Recheck all release size limits
+        run: node build/bin/verify-release-size.js release-assets
 
       - name: Create or update release
         env:

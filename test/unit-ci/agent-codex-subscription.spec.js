@@ -12,9 +12,9 @@ const { handleCodexServerRequest } = require('../../src/app/agent/providers/code
 const {
   CodexAppServerManager,
   PLANNING_ONLY_CONFIG,
-  findBundledCodexExecutable,
   safeAuthUrl
 } = require('../../src/app/agent/providers/codex-app-server-manager')
+const { findLocalCodexExecutable } = require('../../src/app/agent/providers/codex-runtime-manager')
 const { CodexAppServerHarnessAdapter } = require('../../src/app/agent/harness/codex-app-server-adapter')
 const {
   CodexPlannerOutputSchema,
@@ -192,21 +192,14 @@ test('App Server environment excludes inherited credentials and sanitizes diagno
   assert.match(launch.args[3], /^""C:\\Program Files/)
 })
 
-test('bundled Codex executable is resolved without PATH or a global CLI', t => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'electerm-bundled-codex-'))
+test('an existing local Codex CLI is discovered before a download', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'opshalo-local-codex-'))
   t.after(() => fs.rmSync(root, { recursive: true, force: true }))
-  const executable = path.join(root, 'app.asar.unpacked', 'node_modules', '@openai', 'codex-win32-x64', 'vendor', 'x86_64-pc-windows-msvc', 'bin', 'codex.exe')
+  const executable = path.join(root, process.platform === 'win32' ? 'codex.exe' : 'codex')
   fs.mkdirSync(path.dirname(executable), { recursive: true })
   fs.writeFileSync(executable, 'test')
-  assert.equal(findBundledCodexExecutable({
-    platform: 'win32',
-    arch: 'x64',
-    resourcesPath: root,
-    moduleDir: path.join(root, 'app.asar', 'agent', 'providers')
-  }), executable)
-  const installed = findBundledCodexExecutable({ resourcesPath: null })
-  assert.match(installed, /node_modules[\\/]@openai[\\/]codex-/)
-  assert.ok(fs.statSync(installed).size > 0)
+  assert.equal(findLocalCodexExecutable({ platform: process.platform, pathValue: root, home: root }), executable)
+  assert.equal(findLocalCodexExecutable({ platform: process.platform, pathValue: '', home: path.join(root, 'empty'), includeCommon: false }), undefined)
 })
 
 test('planning boundary disables local tools and rejects App Server execution requests', async () => {
@@ -386,7 +379,7 @@ test('manager sends a tool-free planning turn and returns only a structured Plan
   const manager = new CodexAppServerManager({
     profileStore: store,
     clientFactory: () => client,
-    getConfig: () => ({})
+    getConfig: () => ({ codexAppServerExecutable: process.execPath })
   })
   const progress = []
   const result = await manager.runPlannerTurn(profile.profileId, {
