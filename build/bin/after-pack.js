@@ -4,6 +4,8 @@
  */
 const fs = require('fs')
 const path = require('path')
+const asar = require('@electron/asar')
+const { collectForbiddenCodexEntries, isForbiddenCodexPath } = require('./verify-mini-artifact')
 
 exports.default = async function afterPack (context) {
   const appOutDir = context.appOutDir
@@ -21,4 +23,16 @@ exports.default = async function afterPack (context) {
     fs.unlinkSync(defaultApp)
     console.log('[mini-slim] removed Electron default_app.asar fallback')
   }
+  assertNoCodexRuntime(resourcesDir)
 }
+
+function assertNoCodexRuntime (resourcesDir) {
+  const appAsar = path.join(resourcesDir, 'app.asar')
+  if (!fs.existsSync(appAsar)) throw new Error(`Packaged app.asar is missing: ${appAsar}`)
+  const violations = asar.listPackage(appAsar).filter(isForbiddenCodexPath)
+  collectForbiddenCodexEntries(resourcesDir, resourcesDir, violations)
+  if (violations.length) throw new Error(`Packaged application contains Codex runtime:\n${[...new Set(violations)].join('\n')}`)
+  console.log('[runtime-gate] packaged application contains no Codex runtime')
+}
+
+module.exports.assertNoCodexRuntime = assertNoCodexRuntime

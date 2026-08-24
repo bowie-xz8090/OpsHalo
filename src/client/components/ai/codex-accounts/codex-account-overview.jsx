@@ -9,6 +9,7 @@ export default function CodexAccountOverview ({ value, onChange, disabled }) {
   const [accounts, setAccounts] = useState({ currentProfileId: null, profiles: [] })
   const [loading, setLoading] = useState(false)
   const [login, setLogin] = useState(null)
+  const [runtime, setRuntime] = useState(null)
   const unavailable = disabled || !codexApi
 
   const load = async () => {
@@ -25,11 +26,17 @@ export default function CodexAccountOverview ({ value, onChange, disabled }) {
   useEffect(() => {
     load()
     if (!codexApi) return undefined
-    return codexApi.onEvent(event => {
+    codexApi.getRuntimeStatus?.().then(setRuntime).catch(error => message.error(error.safeMessage || error.message))
+    const disposeAccount = codexApi.onEvent(event => {
       if (event?.accounts) setAccounts(event.accounts)
       const profile = event?.accounts?.profiles?.find(item => item.profileId === event.profileId)
       if (profile && terminalStates.includes(profile.authState)) setLogin(null)
     })
+    const disposeRuntime = codexApi.onRuntimeEvent?.(setRuntime)
+    return () => {
+      disposeAccount?.()
+      disposeRuntime?.()
+    }
   }, [])
 
   const run = async action => {
@@ -84,6 +91,23 @@ export default function CodexAccountOverview ({ value, onChange, disabled }) {
     await load()
   })
 
+  const cancelRuntime = async () => {
+    try {
+      setRuntime(await codexApi.cancelRuntimeDownload())
+    } catch (error) {
+      message.error(error.safeMessage || error.message)
+    }
+  }
+
+  const runtimeBusy = runtime?.state === 'downloading' || runtime?.state === 'verifying'
+  const runtimeSize = formatBytes(runtime?.totalBytes)
+  const runtimePercent = runtime?.totalBytes > 0
+    ? Math.min(100, Math.round((runtime.downloadedBytes / runtime.totalBytes) * 100))
+    : 0
+  const addButtonSuffix = runtime?.state === 'missing' || runtime?.state === 'failed'
+    ? `（需下载 ${runtimeSize}）`
+    : ''
+
   return (
     <div className='codex-account-overview'>
       <Alert
@@ -96,9 +120,30 @@ export default function CodexAccountOverview ({ value, onChange, disabled }) {
       {!codexApi && (
         <Alert type='error' showIcon className='mg1b' title='Codex App Server IPC 尚未就绪，请重启应用或重新安装当前版本。' />
       )}
+      {runtime && runtime.state !== 'ready' && (
+        <Alert
+          type={runtime.state === 'failed' ? 'error' : 'info'}
+          showIcon
+          className='mg1b'
+          title={runtimeTitle(runtime)}
+          description={runtimeBusy
+            ? (
+              <Space direction='vertical' className='width-100' size='small'>
+                {runtime.state === 'downloading' && (
+                  <>
+                    <Progress percent={runtimePercent} size='small' />
+                    <Typography.Text type='secondary'>{formatBytes(runtime.downloadedBytes)} / {runtimeSize}</Typography.Text>
+                  </>
+                )}
+                <Button size='small' danger disabled={runtime.state === 'verifying'} onClick={cancelRuntime}>取消下载</Button>
+              </Space>
+              )
+            : runtime.error || `首次使用 Codex 需要下载 ${runtimeSize}，点击下方账号按钮后自动开始。`}
+        />
+      )}
       <Space wrap className='mg1b'>
-        <Button type='primary' disabled={unavailable} loading={loading} onClick={() => startLogin('browser')}>浏览器 OAuth 添加账号</Button>
-        <Button disabled={unavailable} loading={loading} onClick={() => startLogin('device_code')}>设备码添加账号</Button>
+        <Button type='primary' disabled={unavailable || runtimeBusy} loading={loading} onClick={() => startLogin('browser')}>浏览器 OAuth 添加账号{addButtonSuffix}</Button>
+        <Button disabled={unavailable || runtimeBusy} loading={loading} onClick={() => startLogin('device_code')}>设备码添加账号{addButtonSuffix}</Button>
       </Space>
       {login && (
         <Alert
@@ -158,4 +203,17 @@ export default function CodexAccountOverview ({ value, onChange, disabled }) {
       </Space>
     </div>
   )
+}
+
+function runtimeTitle (runtime) {
+  if (runtime.state === 'downloading') return '正在下载 Codex 运行时'
+  if (runtime.state === 'verifying') return '正在校验并初始化 Codex 运行时'
+  if (runtime.state === 'failed') return 'Codex 运行时安装失败，可再次点击账号按钮重试'
+  return 'Codex 运行时尚未安装'
+}
+
+function formatBytes (bytes) {
+  const value = Number(bytes || 0)
+  if (value < 1024 * 1024) return `${Math.max(0, Math.round(value / 1024))} KB`
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`
 }

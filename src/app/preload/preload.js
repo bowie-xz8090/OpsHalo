@@ -73,6 +73,13 @@ contextBridge.exposeInMainWorld(
       selectAccount: request => invokeAgent('codex:select-account', request),
       logout: request => invokeAgent('codex:logout', request),
       removeAccount: request => invokeAgent('codex:remove-account', request),
+      getRuntimeStatus: () => invokeAgent('codex:get-runtime-status', { schemaVersion: 1 }),
+      cancelRuntimeDownload: () => invokeAgent('codex:cancel-runtime-download', { schemaVersion: 1 }),
+      onRuntimeEvent: callback => {
+        const handler = (event, payload) => callback(payload)
+        ipcRenderer.on('codex:runtime-event', handler)
+        return () => ipcRenderer.removeListener('codex:runtime-event', handler)
+      },
       onEvent: callback => {
         const handler = (event, payload) => callback(payload)
         ipcRenderer.on('codex:account-event', handler)

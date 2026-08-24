@@ -363,6 +363,31 @@ Widget、Quick Command、Batch Operation、Profile 和 MCP 不能仅因设置页
 
 macOS 本地验收必须启动 electron-builder 生成的独立 `OpsHalo.app`，不能把 `node_modules/electron/dist/Electron.app` 当作用户应用交付。退出后从相同 app bundle 再次启动时，入口必须仍指向 OpsHalo 的 `app.asar`，不得回退到 Electron 的 `default_app.asar` 欢迎页。
 
+### 13. Codex 原生运行时改为固定版本按需安装
+
+从 1.0.26 起，生产依赖和安装包不再携带 `@openai/codex` 及平台原生包。主进程持有固定的 Codex `0.147.0` manifest；每个受支持的 `platform:arch` 条目包含唯一官方 HTTPS tarball、SHA-512、精确压缩大小、npm 包内三元组、目标可执行文件与允许文件前缀。清单不提供 `latest` 解析或任意 URL 覆盖。
+
+运行时管理器位于 Renderer 信任边界之外，并按以下阶段运行：
+
+1. 解析高级配置中的绝对可执行文件；存在且有效时直接使用。
+2. 检查 `<userData>/agent/codex-runtime/<version>/<platform>-<arch>` 中的安装标记和可执行文件。
+3. 在系统 `PATH` 和当前用户的标准 CLI 目录中发现已有 `codex`，但必须先通过可识别的 `--version` 与 App Server `initialize` smoke 才能复用；本机 CLI 由用户自行维护，不受下载清单版本约束，但不得执行其他名称、Shell alias 或未经验证的命令。
+4. 只有 OAuth、设备码、刷新或重新授权的显式用户动作可在前述来源均不可用时调用 `ensureRuntime({ allowDownload: true })`；Agent Planner 只调用 `allowDownload: false`。
+5. 使用 Electron `net.fetch` 下载到 `.downloads` 分片，利用 ETag 与 `Range` 续传；相同 manifest key 复用同一 Promise 与 AbortController。
+6. 校验响应来源、长度上限和 SHA-512；安全检查 tar entry 后解压到同文件系统的 staging 目录。
+7. 使用隔离的临时 `CODEX_HOME` 执行 `--version` 与 App Server `initialize`，成功后写入不含 URL 的安装标记并原子 rename。
+8. 原子切换成功后才清理其他版本；任一步失败都保留旧可用版本。校验失败删除损坏分片，用户取消则保留可恢复分片。
+
+运行时目录和文件使用仅当前用户可访问的权限。持久化元数据只允许版本、平台、架构、内容完整性标识、ETag、字节数和安装时间；不得出现账号 Token、用户目标、命令、任务输出或下载 URL。
+
+`CodexAppServerManager.startLogin()` 必须先确保运行时就绪，再创建新 profile，以免下载失败留下错误账号。已有 profile 的刷新与重新授权失败时只返回运行时错误，不改变账号认证状态、当前 profile 或 Agent feature flags。OpenAI Compatible 后端完全绕过运行时管理器。
+
+Preload 增加 `getRuntimeStatus()`、`cancelRuntimeDownload()` 和 `onRuntimeEvent(handler)`，但状态投影只包含 `missing | downloading | verifying | ready | failed`、版本、平台、架构、字节进度和脱敏错误。路径、URL、完整性值及进程能力只保留在主进程。
+
+配置页在缺失状态把固定压缩大小显示在两个账号按钮上。用户点击后显示下载进度和取消入口；验证完成自动继续 OAuth。失败保留可读错误和重试入口。Agent 模式在运行时缺失时只引导到配置页，不得后台下载。
+
+发布工作流在各目标平台先于打包执行真实固定运行时 smoke，并在临时目录清理测试缓存。成品扫描拒绝任何 Codex npm 包或原生二进制；Windows installer 必须小于 100 MB，macOS DMG、Linux DEB/RPM/AppImage 必须小于 130 MB，Linux/Windows tar.gz 必须小于 160 MB。
+
 ## Detailed Data Contracts
 
 ### Provider event

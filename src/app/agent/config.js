@@ -40,6 +40,10 @@ function codexAccountsRoot (userDataPath) {
   return path.join(userDataPath, 'ai-accounts', 'codex', `v${SCHEMA_VERSION}`)
 }
 
+function codexRuntimeRoot (userDataPath) {
+  return path.join(userDataPath, 'agent', 'codex-runtime')
+}
+
 function normalizeAiBackendSelection (config = {}) {
   const type = config.aiBackendType === 'codex_subscription'
     ? 'codex_subscription'
@@ -73,6 +77,7 @@ module.exports = {
   defaults,
   runtimeRoot,
   codexAccountsRoot,
+  codexRuntimeRoot,
   normalizeAiBackendSelection,
   normalizeFeatureFlags
 }

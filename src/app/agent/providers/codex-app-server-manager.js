@@ -1,6 +1,4 @@
 const { EventEmitter } = require('events')
-const fs = require('fs')
-const path = require('path')
 const { CodexJsonRpcClient, rpcError, sanitizeErrorText } = require('./codex-jsonrpc-client')
 const { PLANNING_ONLY_INSTRUCTIONS, handleCodexServerRequest } = require('./codex-tool-bridge')
 const { buildPrompt } = require('../harness/prompt-builder')
@@ -33,6 +31,7 @@ class CodexAppServerManager extends EventEmitter {
   constructor (options) {
     super()
     this.profileStore = options.profileStore
+    this.runtimeManager = options.runtimeManager
     this.getConfig = options.getConfig || (() => ({}))
     this.audit = options.audit
     this.version = options.version || '0.0.0'
@@ -50,7 +49,7 @@ class CodexAppServerManager extends EventEmitter {
     return this.profileStore.list()
   }
 
-  async clientFor (profileId) {
+  async clientFor (profileId, options = {}) {
     const profile = this.profileStore.get(profileId)
     if (!profile) throw managerError('CODEX_PROFILE_NOT_FOUND', 'Codex 账号不存在。')
     let client = this.clients.get(profileId)
@@ -59,7 +58,7 @@ class CodexAppServerManager extends EventEmitter {
       return client
     }
     const paths = this.profileStore.ensureProfileDirectories(profileId)
-    const executable = resolveCodexExecutable(this.getConfig())
+    const executable = options.executable || await this.resolveExecutable(options.allowDownload === true)
     client = this.clientFactory({
       executable,
       cwd: paths.runtime,
@@ -129,9 +128,10 @@ class CodexAppServerManager extends EventEmitter {
 
   async startLogin ({ profileId, displayName, method }) {
     let profile = profileId ? this.profileStore.get(profileId) : null
+    const executable = await this.resolveExecutable(true)
     if (!profile) profile = this.profileStore.create(displayName || 'Codex account')
     if (this.isProfileBusy(profile.profileId)) throw managerError('CODEX_PROFILE_BUSY', '该账号仍有活跃 Agent 任务，请先安全停止任务。')
-    const client = await this.clientFor(profile.profileId)
+    const client = await this.clientFor(profile.profileId, { executable })
     const type = method === 'device_code' ? 'chatgptDeviceCode' : 'chatgpt'
     this.profileStore.update(profile.profileId, { authState: 'authorizing', error: null })
     this.publishProfile(profile.profileId, 'login_started')
@@ -182,8 +182,8 @@ class CodexAppServerManager extends EventEmitter {
     }
   }
 
-  async refreshAccount (profileId, refreshToken = false) {
-    const client = await this.clientFor(profileId)
+  async refreshAccount (profileId, refreshToken = false, options = {}) {
+    const client = await this.clientFor(profileId, { allowDownload: options.allowDownload !== false })
     const result = await client.request('account/read', { refreshToken }, { timeoutMs: 20000 })
     const account = result?.account
     if (!account || account.type !== 'chatgpt') {
@@ -246,7 +246,7 @@ class CodexAppServerManager extends EventEmitter {
     const profile = this.profileStore.get(profileId)
     if (!profile) throw managerError('CODEX_PROFILE_NOT_FOUND', '请选择有效的 Codex 账号。')
     progress('connecting', '正在连接 Codex App Server…')
-    const client = await this.clientFor(profileId)
+    const client = await this.clientFor(profileId, { allowDownload: false })
     progress('authenticating', '正在确认 Codex 账号状态…')
     const account = await this.readCachedAccount(profileId, client)
     if (account?.account?.type !== 'chatgpt') throw managerError('CODEX_AUTH_REQUIRED', 'Codex 账号尚未授权或登录已失效，请重新授权。')
@@ -396,6 +396,11 @@ class CodexAppServerManager extends EventEmitter {
     this.emit('accountEvent', { schemaVersion: 1, profileId, reason, accounts: this.listAccounts() })
   }
 
+  async resolveExecutable (allowDownload) {
+    if (!this.runtimeManager) return resolveCodexExecutable(this.getConfig())
+    return this.runtimeManager.resolveExecutable(this.getConfig(), { allowDownload })
+  }
+
   async dispose () {
     const entries = [...this.clients.entries()]
     const clients = entries.map(([, client]) => client)
@@ -412,50 +417,12 @@ class CodexAppServerManager extends EventEmitter {
 function resolveCodexExecutable (config = {}) {
   const configured = String(config.codexAppServerExecutable || process.env.CODEX_APP_SERVER_EXECUTABLE || '').trim()
   if (configured) {
+    const path = require('path')
+    const fs = require('fs')
     if (!path.isAbsolute(configured) || !fs.existsSync(configured)) throw managerError('CODEX_EXECUTABLE_NOT_FOUND', '配置的 Codex App Server 可执行文件不存在。')
     return configured
   }
-  const bundled = findBundledCodexExecutable()
-  if (bundled) return bundled
-  throw managerError('CODEX_BUNDLED_EXECUTABLE_NOT_FOUND', '安装包内置的 Codex App Server 不完整，请重新安装 OpsHalo。')
-}
-
-function findBundledCodexExecutable (options = {}) {
-  const platform = options.platform || process.platform
-  const arch = options.arch || process.arch
-  const resourcesPath = options.resourcesPath === undefined ? process.resourcesPath : options.resourcesPath
-  const moduleDir = options.moduleDir || __dirname
-  const target = codexTarget(platform, arch)
-  if (!target) return undefined
-  const roots = [
-    resourcesPath && path.join(resourcesPath, 'app.asar.unpacked', 'node_modules'),
-    resourcesPath && path.join(resourcesPath, 'app', 'node_modules'),
-    path.resolve(moduleDir, '../../node_modules'),
-    path.resolve(moduleDir, '../../../../node_modules')
-  ].filter(Boolean)
-  try {
-    const packageJson = require.resolve(`${target.packageName}/package.json`)
-    roots.push(path.resolve(path.dirname(packageJson), '../..'))
-  } catch (_) {}
-  for (const root of [...new Set(roots)]) {
-    const executable = path.join(root, target.packageName, 'vendor', target.triple, 'bin', target.executableName)
-      .replace(`${path.sep}app.asar${path.sep}`, `${path.sep}app.asar.unpacked${path.sep}`)
-    if (fs.existsSync(executable)) return executable
-  }
-  return undefined
-}
-
-function codexTarget (platform, arch) {
-  const targets = {
-    'win32:x64': ['@openai/codex-win32-x64', 'x86_64-pc-windows-msvc', 'codex.exe'],
-    'win32:arm64': ['@openai/codex-win32-arm64', 'aarch64-pc-windows-msvc', 'codex.exe'],
-    'linux:x64': ['@openai/codex-linux-x64', 'x86_64-unknown-linux-musl', 'codex'],
-    'linux:arm64': ['@openai/codex-linux-arm64', 'aarch64-unknown-linux-musl', 'codex'],
-    'darwin:x64': ['@openai/codex-darwin-x64', 'x86_64-apple-darwin', 'codex'],
-    'darwin:arm64': ['@openai/codex-darwin-arm64', 'aarch64-apple-darwin', 'codex']
-  }
-  const value = targets[`${platform}:${arch}`]
-  return value && { packageName: value[0], triple: value[1], executableName: value[2] }
+  throw managerError('CODEX_RUNTIME_MISSING', 'Codex 运行时尚未安装，请打开 AI 配置并点击账号按钮完成下载。')
 }
 
 function safeAuthUrl (value) {
@@ -509,8 +476,6 @@ module.exports = {
   CodexAppServerManager,
   PLANNING_ONLY_CONFIG,
   resolveCodexExecutable,
-  findBundledCodexExecutable,
-  codexTarget,
   safeAuthUrl,
   extractUsage,
   parseStructuredJson,

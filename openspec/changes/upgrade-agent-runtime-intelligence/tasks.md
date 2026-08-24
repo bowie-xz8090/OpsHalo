@@ -127,3 +127,13 @@
 - [x] 11.3 产品代码中不存在旧的 Agent 直接 SSH/MCP/SFTP 执行旁路，也不存在 Provider 原始流进入 Renderer 的路径。
 - [x] 11.4 真实 smoke、性能报告、安全报告、许可证 clean-room 审查和 migration rollback 记录齐全。
 - [ ] 11.5 用户明确验收后更新任务状态并归档；仅完成规格不得勾选本清单。
+
+## 12. Codex 运行时按需下载与 1.0.26 瘦身
+
+- [x] 12.1 增加 Codex 0.147.0 固定平台清单和主进程运行时管理器，覆盖 Electron 网络栈下载、并发合并、取消、Range/ETag 续传、大小与 SHA-512 校验、安全解压、双 smoke、原子安装和旧版清理。
+- [x] 12.2 将运行时解析接入 Codex App Server；按自定义路径、OpsHalo 缓存、通过双重 smoke 的本机 Codex、固定下载的顺序解析；Agent 运行不后台下载，下载失败或取消不改变账号、当前选择或 Agent 状态，也不创建残留账号。
+- [x] 12.3 增加受限 runtime IPC/preload 接口和 AI 配置页状态、大小、进度、取消、失败重试与自动继续授权交互，不向 Renderer 暴露路径、URL、校验值或进程能力。
+- [x] 12.4 从生产依赖和 `asarUnpack` 移除 Codex，升级到 1.0.26；成品扫描明确拒绝 Codex npm 包与原生二进制。
+- [x] 12.5 增加平台映射、并发、进度、取消、续传、Range 回退、断流、损坏恢复、超限、恶意路径、原子安装、旧版保留/清理和账号状态保持测试。
+- [x] 12.6 GitHub Actions 各平台执行固定官方运行时完整性/App Server 初始化 smoke，并对 Windows、macOS、Linux 成品执行体积门禁和 SHA256SUMS 发布校验。
+- [ ] 12.7 构建并发布 v1.0.26 多平台小包，验证真实 OAuth 下载后的规划流程；v1.0.25 作为最后一个内置 Codex 的离线版本保留。

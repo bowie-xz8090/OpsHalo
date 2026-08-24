@@ -13,8 +13,9 @@ const LoginSchema = z.strictObject({
 })
 const CancelLoginSchema = z.strictObject({ schemaVersion: VersionSchema.optional(), profileId: IdSchema, loginId: z.string().min(1).max(200) })
 const ProfileSchema = z.strictObject({ schemaVersion: VersionSchema.optional(), profileId: IdSchema })
+const RuntimeSchema = z.strictObject({ schemaVersion: VersionSchema.optional() })
 
-function registerCodexIpc ({ ipcMain, manager, openExternal }) {
+function registerCodexIpc ({ ipcMain, manager, runtimeManager, openExternal }) {
   const limiter = new SlidingWindowRateLimiter()
   const channels = []
   const register = (channel, schema, rate, handler) => {
@@ -45,6 +46,8 @@ function registerCodexIpc ({ ipcMain, manager, openExternal }) {
   register('codex:select-account', ProfileSchema, { limit: 4, intervalMs: 1000, maxBytes: 2048 }, request => manager.selectProfile(request.profileId))
   register('codex:logout', ProfileSchema, { limit: 2, intervalMs: 5000, maxBytes: 2048 }, request => manager.logout(request.profileId))
   register('codex:remove-account', ProfileSchema, { limit: 2, intervalMs: 5000, maxBytes: 2048 }, request => manager.removeProfile(request.profileId))
+  register('codex:get-runtime-status', RuntimeSchema, { limit: 6, intervalMs: 1000, maxBytes: 1024 }, () => runtimeManager.getStatus())
+  register('codex:cancel-runtime-download', RuntimeSchema, { limit: 4, intervalMs: 1000, maxBytes: 1024 }, () => runtimeManager.cancelDownload())
   return () => channels.forEach(channel => ipcMain.removeHandler(channel))
 }
 
@@ -55,4 +58,4 @@ function ipcError (code, safeMessage) {
   return error
 }
 
-module.exports = { registerCodexIpc, LoginSchema, ProfileSchema }
+module.exports = { registerCodexIpc, LoginSchema, ProfileSchema, RuntimeSchema }

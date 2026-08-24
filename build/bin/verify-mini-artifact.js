@@ -20,6 +20,7 @@ const removedRelativePaths = [
 ]
 
 const removedModules = [
+  '@openai/codex',
   '@electerm/ftp-srv',
   '@novnc/novnc',
   'basic-ftp',
@@ -30,7 +31,6 @@ const removedModules = [
 ]
 
 const requiredRuntimePaths = [
-  'node_modules/@openai/codex/bin/codex.js',
   'node_modules/@strands-agents/sdk/dist/src/agent/agent.js',
   'node_modules/@strands-agents/sdk/dist/src/models/openai/model.js',
   'node_modules/@strands-agents/sdk/dist/src/tools/structured-output-tool.js',
@@ -46,6 +46,7 @@ function verifyMiniArtifact (artifactRoot = path.resolve(__dirname, '../../work/
   for (const moduleName of removedModules) {
     if (fs.existsSync(path.join(artifactRoot, 'node_modules', ...moduleName.split('/')))) violations.push(`node_modules/${moduleName}`)
   }
+  collectForbiddenCodexEntries(artifactRoot, artifactRoot, violations)
   for (const relative of requiredRuntimePaths) {
     if (!fs.existsSync(path.join(artifactRoot, relative))) violations.push(`missing:${relative}`)
   }
@@ -58,9 +59,36 @@ function verifyMiniArtifact (artifactRoot = path.resolve(__dirname, '../../work/
   return { artifactRoot, checkedPaths: removedRelativePaths.length, checkedModules: removedModules.length, checkedRuntimePaths: requiredRuntimePaths.length }
 }
 
+function collectForbiddenCodexEntries (root, current, violations) {
+  let entries = []
+  try { entries = fs.readdirSync(current, { withFileTypes: true }) } catch (_) { return }
+  for (const entry of entries) {
+    const absolute = path.join(current, entry.name)
+    const relative = path.relative(root, absolute)
+    if (entry.isSymbolicLink()) continue
+    if (entry.isDirectory()) {
+      if (isForbiddenCodexPath(relative)) {
+        violations.push(relative)
+        continue
+      }
+      collectForbiddenCodexEntries(root, absolute, violations)
+      continue
+    }
+    if (entry.isFile() && isForbiddenCodexPath(relative)) {
+      violations.push(relative)
+    }
+  }
+}
+
+function isForbiddenCodexPath (relativePath) {
+  const normalized = String(relativePath || '').split(path.sep).join('/').replace(/^\/+/, '')
+  return /(?:^|\/)node_modules\/@openai\/codex(?:-|\/|$)/.test(normalized) ||
+    /(?:^|\/)(?:codex|codex\.exe|codex-code-mode-host(?:\.exe)?|codex-command-runner\.exe|codex-windows-sandbox-setup\.exe|codex-linux-sandbox)$/.test(normalized)
+}
+
 if (require.main === module) {
   const result = verifyMiniArtifact(process.argv[2])
   console.log(`Mini artifact verified: ${result.checkedPaths} removed paths, ${result.checkedModules} removed modules, ${result.checkedRuntimePaths} required runtime paths`)
 }
 
-module.exports = { verifyMiniArtifact, removedRelativePaths, removedModules, requiredRuntimePaths }
+module.exports = { verifyMiniArtifact, removedRelativePaths, removedModules, requiredRuntimePaths, collectForbiddenCodexEntries, isForbiddenCodexPath }
