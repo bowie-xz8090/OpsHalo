@@ -61,9 +61,9 @@ jobs:
         run: |
           npm config set legacy-peer-deps true
           npm install --global yarn node-gyp
-          npm uninstall node-pty serialport
+          npm uninstall node-pty
           npm install --legacy-peer-deps
-          npm install --save-exact node-pty@1.1.0-beta14 serialport@13.0.0
+          npm install --save-exact node-pty@1.1.0-beta14
 
       - name: Verify pinned Codex runtime download and App Server initialization
         run: npm run verify-codex-runtime
