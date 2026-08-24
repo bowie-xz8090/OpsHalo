@@ -228,7 +228,7 @@ jobs:
           npm ci --legacy-peer-deps
 
       - name: Verify pinned Codex runtime download and App Server initialization
-        run: xvfb-run -a npm run verify-codex-runtime
+        run: xvfb-run -a ./node_modules/.bin/electron --no-sandbox build/bin/verify-codex-runtime.js
 
       - name: Prepare packaged application
         run: npm run b
