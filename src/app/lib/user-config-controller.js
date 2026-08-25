@@ -6,6 +6,7 @@ const { dbAction } = require('./db')
 const { userConfigId, userNoEncryptConfigId } = require('../common/constants')
 const { getDbConfig } = require('./get-config')
 const globalState = require('./glob-state')
+const { normalizeLegacyAgentConfig } = require('../agent/config')
 
 const configNoEncryptFields = ['allowMultiInstance']
 
@@ -19,6 +20,7 @@ function hasNoEncryptFields (userConfig) {
 }
 
 exports.saveUserConfig = async (userConfig) => {
+  userConfig = normalizeLegacyAgentConfig(userConfig)
   const q = {
     _id: userConfigId
   }
@@ -43,11 +45,12 @@ exports.saveUserConfig = async (userConfig) => {
       upsert: true
     })
   }
-  const result = await dbAction('data', 'update', q, {
+  const persistedConfig = normalizeLegacyAgentConfig({
     ...q,
     ...conf,
     ...userConfig
-  }, {
+  })
+  const result = await dbAction('data', 'update', q, persistedConfig, {
     upsert: true
   })
   try {

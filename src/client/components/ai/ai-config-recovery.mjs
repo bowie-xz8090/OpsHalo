@@ -10,9 +10,7 @@ const RECOVERABLE_API_FIELDS = [
   'proxyAI',
   'agentModeEnabled',
   'agentMutationEnabled',
-  'agentExternalMcpEnabled',
-  'agentHarnessAdapter',
-  'agentCompatibleFallbackEnabled'
+  'agentExternalMcpEnabled'
 ]
 
 function text (value) {

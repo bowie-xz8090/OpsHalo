@@ -11,7 +11,6 @@ const { ExecutionRuntime } = require('../../src/app/agent/execution/execution-ru
 const { SshExecAdapter } = require('../../src/app/agent/execution/ssh-exec-adapter')
 const { SftpAdapter } = require('../../src/app/agent/execution/sftp-adapter')
 const { VerificationRunner } = require('../../src/app/agent/verification/verification-runner')
-const { StrandsHarnessAdapter, isSdkCompatibilityError } = require('../../src/app/agent/harness/strands-harness-adapter')
 const { StrictJsonHarnessAdapter } = require('../../src/app/agent/harness/strict-json-adapter')
 const { parseMessage } = require('../../src/app/agent/harness/decision-parser')
 const { classifyHarnessError } = require('../../src/app/agent/harness/harness-errors')
@@ -473,7 +472,7 @@ test('Ctrl+C style cancellation preempts a busy mailbox before the state command
     sessionBinding: binding(),
     mode: 'diagnose',
     prompt: 'inspect service',
-    harness: { adapter: 'strands', modelId: 'test', providerId: 'test', supportsNativeTools: false, supportsStructuredOutput: true, maxContextTokens: 32000 },
+    harness: { adapter: 'openai_compatible', modelId: 'test', providerId: 'test', supportsNativeTools: true, supportsStructuredOutput: true, maxContextTokens: 32000 },
     budget: budget(),
     memory: memory(),
     evidenceRefs: [],
@@ -510,7 +509,7 @@ test('resume rejects stale snapshots and changed session bindings', async () => 
     sessionBinding: binding(),
     mode: 'diagnose',
     prompt: 'inspect service',
-    harness: { adapter: 'strands', modelId: 'test', providerId: 'test', supportsNativeTools: false, supportsStructuredOutput: true, maxContextTokens: 32000 },
+    harness: { adapter: 'openai_compatible', modelId: 'test', providerId: 'test', supportsNativeTools: true, supportsStructuredOutput: true, maxContextTokens: 32000 },
     budget: budget(),
     memory: memory(),
     evidenceRefs: [],
@@ -549,7 +548,7 @@ test('terminal task cleanup revokes capabilities and disposes its harness once',
     sessionBinding: binding(),
     mode: 'diagnose',
     prompt: 'inspect service',
-    harness: { adapter: 'strands', modelId: 'test', providerId: 'test', supportsNativeTools: false, supportsStructuredOutput: true, maxContextTokens: 32000 },
+    harness: { adapter: 'openai_compatible', modelId: 'test', providerId: 'test', supportsNativeTools: true, supportsStructuredOutput: true, maxContextTokens: 32000 },
     budget: budget(),
     memory: memory(),
     evidenceRefs: [],
@@ -595,7 +594,7 @@ test('Ctrl+C during a mutation waits for its declared verification safe point', 
     sessionBinding: binding(),
     mode: 'operate',
     prompt: 'restart service',
-    harness: { adapter: 'strands', modelId: 'test', providerId: 'test', supportsNativeTools: false, supportsStructuredOutput: true, maxContextTokens: 32000 },
+    harness: { adapter: 'openai_compatible', modelId: 'test', providerId: 'test', supportsNativeTools: true, supportsStructuredOutput: true, maxContextTokens: 32000 },
     budget: budget(),
     memory: {
       ...memory(),
@@ -670,93 +669,6 @@ test('sensitive-value detector rejects supplied secrets without blocking ordinar
   assert.equal(containsSensitiveMaterial('check whether API_KEY is configured, but do not reveal it'), false)
 })
 
-test('Strands adapter reuses one no-tools Agent for every fact-ledger turn in a task', async () => {
-  let created = 0
-  const toolLists = []
-  const decision = {
-    schemaVersion: 1,
-    goalStatus: 'need_user',
-    planSummary: 'need scope',
-    reasonSummary: 'missing target',
-    knownFactIds: [],
-    missingInformation: ['target'],
-    completionCriteria: [],
-    userQuestion: 'Which service?'
-  }
-  const adapter = new StrandsHarnessAdapter({ maxContextTokens: 32000 }, {
-    agentFactory: async options => {
-      created++
-      toolLists.push(options.tools)
-      return { invoke: async () => ({ structuredOutput: decision }), cancel: () => {} }
-    }
-  })
-  const input = {
-    schemaVersion: 1,
-    taskId: 'task_12345',
-    objective: 'inspect service',
-    mode: 'diagnose',
-    sessionSummary: { host: 'example.test', username: 'tester', cwd: '/srv/app', shell: '/bin/bash', platform: 'linux' },
-    workingMemory: memory(),
-    budgetRemaining: {},
-    availableTools: []
-  }
-  const first = []
-  for await (const event of adapter.runTurn(input)) first.push(event)
-  const second = []
-  for await (const event of adapter.runTurn(input)) second.push(event)
-  assert.equal(created, 1)
-  assert.deepEqual(toolLists, [[]])
-  assert.equal(first.at(-1).type, 'decision.completed')
-  assert.equal(second.at(-1).type, 'decision.completed')
-})
-
-test('Strands adapter repairs invalid structured output once and then fails closed to suggestion mode', async () => {
-  const decision = {
-    schemaVersion: 1,
-    goalStatus: 'need_user',
-    planSummary: 'safe repaired result',
-    reasonSummary: 'the structure was repaired',
-    knownFactIds: [],
-    missingInformation: ['container list'],
-    completionCriteria: [],
-    userQuestion: 'retry'
-  }
-  let repairCalls = 0
-  const repaired = new StrandsHarnessAdapter({ maxContextTokens: 32000 }, {
-    agentFactory: async () => ({
-      invoke: async () => {
-        repairCalls++
-        if (repairCalls === 1) throw new Error('invalid structured output schema')
-        return { structuredOutput: decision }
-      },
-      cancel: () => {}
-    })
-  })
-  const input = { objective: 'list nginx containers', mode: 'diagnose', sessionSummary: {}, workingMemory: memory(), budgetRemaining: {}, availableTools: [] }
-  const repairedEvents = []
-  for await (const event of repaired.runTurn(input)) repairedEvents.push(event)
-  assert.equal(repairCalls, 2)
-  assert.equal(repairedEvents.find(event => event.code === 'structure_repaired')?.code, 'structure_repaired')
-  assert.equal(repairedEvents.at(-1).decision.planSummary, 'safe repaired result')
-
-  let invalidCalls = 0
-  const invalid = new StrandsHarnessAdapter({ maxContextTokens: 32000 }, {
-    agentFactory: async () => ({
-      invoke: async () => {
-        invalidCalls++
-        throw Object.assign(new Error('decision validation failed'), { name: 'ZodError' })
-      },
-      cancel: () => {}
-    })
-  })
-  const degradedEvents = []
-  for await (const event of invalid.runTurn(input)) degradedEvents.push(event)
-  assert.equal(invalidCalls, 2)
-  assert.equal(degradedEvents.find(event => event.code === 'suggestion_mode_required')?.code, 'suggestion_mode_required')
-  assert.equal(degradedEvents.at(-1).decision.goalStatus, 'blocked')
-  assert.equal(degradedEvents.at(-1).decision.action, undefined)
-})
-
 test('strict JSON adapter repairs once and native function decisions use the same contract', async () => {
   const decision = {
     schemaVersion: 1,
@@ -805,12 +717,10 @@ test('prompt builder prevents untrusted output from closing policy boundaries', 
   assert.match(prompt, /\\u003c\/WORKING_MEMORY\\u003e/)
 })
 
-test('offline failures stay explicit while SDK compatibility fallback is separately detectable', () => {
+test('offline provider failures stay explicit and retryable', () => {
   const offline = classifyHarnessError(new Error('connect ECONNREFUSED 127.0.0.1'))
   assert.equal(offline.category, 'transport_error')
   assert.equal(offline.retryable, true)
-  assert.equal(isSdkCompatibilityError(offline), false)
-  assert.equal(isSdkCompatibilityError(Object.assign(new Error('Cannot find package example'), { code: 'ERR_MODULE_NOT_FOUND' })), true)
 })
 
 test('mutation verification obligation blocks completion until a postcheck passes', () => {

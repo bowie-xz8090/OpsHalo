@@ -114,6 +114,25 @@ OpenAI Compatible/API Key 与 Codex Subscription SHALL 保持显式互斥。Prov
 - **THEN** 系统报告当前后端不可用并停止新动作
 - **AND** 不使用已保存的 API Key 继续任务
 
+### Requirement: 活动 AI 后端必须与产品入口一致
+
+系统 SHALL 只创建 OpenAI Compatible 或 Codex Subscription Provider。历史配置中的 `agentHarnessAdapter=strands` SHALL 在加载时确定性归一化为 `openai_compatible`，且迁移 MUST NOT 改变 AI 账号、当前账号选择、Agent 启用状态或其他有效设置。历史记录中的 `strands` 标识 MAY 被动读取，但新配置和新任务 MUST NOT 再写入该标识或加载 Strands 运行时。
+
+#### Scenario: 旧 Strands 配置升级
+
+- **GIVEN** 已保存配置包含 `agentHarnessAdapter=strands`、已启用 Agent 和已选择账号
+- **WHEN** 1.0.27 加载并保存 AI 配置
+- **THEN** 有效 Harness 使用 OpenAI Compatible
+- **AND** 账号集合、当前账号和 Agent 开关保持不变
+- **AND** 新写入配置不包含 Strands 选择
+
+#### Scenario: 读取历史 Strands 记录
+
+- **GIVEN** 历史 task 或指标记录包含 `providerType=strands`
+- **WHEN** 1.0.27 展示或聚合该记录
+- **THEN** 系统安全解析该只读标识
+- **AND** 不导入 Strands SDK、不创建 Provider Session，也不执行历史动作
+
 ### Requirement: Provider 会话必须应用选择的模型参数
 
 adapter MUST 将 task snapshot 中的 model、reasoning effort、timeout 和结构化输出模式传给 Provider。无法支持的字段 MUST 在 capability probe 或 task 创建时明确报告，MUST NOT 静默忽略关键安全字段。

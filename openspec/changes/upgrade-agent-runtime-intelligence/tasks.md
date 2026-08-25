@@ -137,3 +137,12 @@
 - [x] 12.5 增加平台映射、并发、进度、取消、续传、Range 回退、断流、损坏恢复、超限、恶意路径、原子安装、旧版保留/清理和账号状态保持测试。
 - [x] 12.6 GitHub Actions 各平台执行固定官方运行时完整性/App Server 初始化 smoke，并对 Windows、macOS、Linux 成品执行体积门禁和 SHA256SUMS 发布校验。
 - [ ] 12.7 构建并发布 v1.0.26 多平台小包，验证真实 OAuth 下载后的规划流程；v1.0.25 作为最后一个内置 Codex 的离线版本保留。
+
+## 13. Electron 稳妥瘦身与 1.0.27 发布
+
+- [x] 13.1 从 AI 配置页、默认配置和有效配置写入中移除隐藏 Strands 选择；旧 `agentHarnessAdapter=strands` 确定性迁移为 `openai_compatible`，并保持账号、当前选择与 Agent 开关。
+- [x] 13.2 删除 Strands Harness adapter 及其专用运行时路径，移除 `@strands-agents/sdk`、`openai`、`@modelcontextprotocol/sdk`、`@opentelemetry/api`、AWS/Smithy 和项目未使用的顶层 `jsonwebtoken` 声明；保留同步组件实际使用的 JWT 传递依赖。
+- [x] 13.3 扩展生产依赖清理、`afterPack` 与独立成品扫描，拒绝已移除依赖、Strands adapter 和 Codex 原生二进制，并强制 `app.asar <= 18 MiB`。
+- [x] 13.4 增加旧 Strands 配置迁移、账号状态保持、OpenAI Compatible/Codex Subscription 规划、依赖禁入和平台体积门禁测试。
+- [x] 13.5 升级到 1.0.27，执行完整单元、Agent、AI 配置、SSH/SFTP、终端 WebGL、打包启动和 OpenSpec 验证；不得裁剪 GPU、SwiftShader、ffmpeg、语言运行支持或用户可见功能。
+- [ ] 13.6 通过 GitHub Actions 发布 v1.0.27 全平台安装包与 `SHA256SUMS.txt`，满足 Windows installer `<= 90 MiB`、Windows tar.gz `< 120 MiB`、macOS DMG `< 95 MiB`、Linux包 `< 85 MiB`、Linux tar.gz `< 105 MiB`；`11.5` 与真实 OAuth 验收继续保持未勾选。

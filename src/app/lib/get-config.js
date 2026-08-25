@@ -4,11 +4,21 @@ const getPort = require('./get-port')
 const { userConfigId, userNoEncryptConfigId } = require('../common/constants')
 const generate = require('../common/uid')
 const globalState = require('./glob-state')
+const { normalizeLegacyAgentConfig, hasLegacyAgentConfig } = require('../agent/config')
 
 exports.getConfig = async (inited) => {
-  const userConfig = await dbAction('data', 'findOne', {
+  const query = {
     _id: userConfigId
-  }) || {}
+  }
+  const storedUserConfig = await dbAction('data', 'findOne', query) || {}
+  const shouldMigrateAgentConfig = hasLegacyAgentConfig(storedUserConfig)
+  const userConfig = normalizeLegacyAgentConfig(storedUserConfig)
+  if (shouldMigrateAgentConfig) {
+    await dbAction('data', 'update', query, {
+      ...userConfig,
+      _id: userConfigId
+    }, { upsert: true })
+  }
   const requireAuth = userConfig.hashedPassword
   delete userConfig._id
   delete userConfig.host

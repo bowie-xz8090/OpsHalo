@@ -388,10 +388,8 @@ test('observation summarizer input is hard bounded and contains only redacted ev
   assert.deepEqual(request.tools, [])
 })
 
-test('observation summarizer never crosses Codex or Strands task adapters', async () => {
+test('observation summarizer never crosses the Codex backend boundary', async () => {
   let calls = 0
-  const summarizer = new OpenAIObservationSummarizer({ aiBackendType: 'openai_compatible' }, { completion: async () => { calls++; return '{}' } })
-  assert.equal(await summarizer.summarize({}, undefined, { session: { harness: { adapter: 'strands' } } }), null)
   const codex = new OpenAIObservationSummarizer({ aiBackendType: 'codex_subscription' }, { completion: async () => { calls++; return '{}' } })
   assert.equal(await codex.summarize({}, undefined, { session: { harness: { adapter: 'codex_app_server' } } }), null)
   assert.equal(calls, 0)
@@ -895,7 +893,7 @@ test('ProviderSessionManager permits one same-backend rebuild only', async () =>
   const record = {
     taskId: 'task_provider_rebuild_12345',
     harness: {
-      adapter: 'strands',
+      adapter: 'openai_compatible',
       modelId: 'planner',
       providerId: 'example.test',
       supportsNativeTools: false,
@@ -938,7 +936,7 @@ test('task latency records only numeric milestones and status metadata', () => {
   for (const forbidden of ['prompt text', 'response text', 'command text', 'server.example.test', 'sk-proj-secret', 'raw output']) assert.doesNotMatch(serialized, new RegExp(forbidden, 'i'))
 })
 
-test('provider baseline groups the three runtime paths without retaining task content', () => {
+test('provider baseline reads legacy Strands metrics without retaining task content', () => {
   const records = [
     { adapter: 'openai_compatible', modelTurns: 2, durationsMs: { firstStatus: 10, firstModelResponse: 100, firstExecutionResult: 200, total: 300 } },
     { adapter: 'codex_subscription', modelTurns: 1, durationsMs: { firstStatus: 20, firstModelResponse: 110, firstExecutionResult: 210, total: 310 } },

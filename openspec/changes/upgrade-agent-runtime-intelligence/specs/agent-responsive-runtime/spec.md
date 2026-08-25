@@ -48,7 +48,7 @@
 
 ### Requirement: Provider 会话必须按任务复用和释放
 
-系统 SHALL 为每个 task 创建至多一个活动 Planner Provider Session，并在后续 ReAct 回合复用。可缓存账号读取、Codex thread 创建和 Strands Agent 初始化 MUST NOT 在每个回合重复执行。任务完成、失败、取消、过期或应用关闭后，session MUST 被释放。
+系统 SHALL 为每个 task 创建至多一个活动 Planner Provider Session，并在后续 ReAct 回合复用。可缓存账号读取和 Codex thread 创建 MUST NOT 在每个回合重复执行。任务完成、失败、取消、过期或应用关闭后，session MUST 被释放。
 
 #### Scenario: Codex 任务包含三个规划回合
 

@@ -39,9 +39,36 @@ jobs:
             exit 1
           fi
 
+  verify-source:
+    name: Verify source and behavior
+    needs: validate
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Lint source
+        run: npm run lint
+
+      - name: Run unit and Agent tests
+        run: npm run test-unit-ci
+
+      - name: Run integration tests
+        run: npm run test-integration
+
+      - name: Validate OpenSpec change
+        run: npx openspec validate upgrade-agent-runtime-intelligence --strict
+
   build-windows:
     name: Windows x64
-    needs: validate
+    needs: verify-source
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
@@ -71,7 +98,7 @@ jobs:
       - name: Prepare packaged application
         run: npm run b
 
-      - name: Verify packaged application excludes Codex runtime
+      - name: Verify packaged application excludes forbidden runtimes
         run: npm run verify-mini-artifact
 
       - name: Prepare electron-builder configuration
@@ -101,7 +128,7 @@ jobs:
 
   build-macos-arm64:
     name: macOS ARM64
-    needs: validate
+    needs: verify-source
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
@@ -128,7 +155,7 @@ jobs:
       - name: Prepare packaged application
         run: npm run b
 
-      - name: Verify packaged application excludes Codex runtime
+      - name: Verify packaged application excludes forbidden runtimes
         run: npm run verify-mini-artifact
 
       - name: Prepare electron-builder configuration
@@ -155,7 +182,7 @@ jobs:
 
   build-macos-x64:
     name: macOS x64
-    needs: validate
+    needs: verify-source
     runs-on: macos-15-intel
     steps:
       - uses: actions/checkout@v4
@@ -182,7 +209,7 @@ jobs:
       - name: Prepare packaged application
         run: npm run b
 
-      - name: Verify packaged application excludes Codex runtime
+      - name: Verify packaged application excludes forbidden runtimes
         run: npm run verify-mini-artifact
 
       - name: Prepare electron-builder configuration
@@ -209,7 +236,7 @@ jobs:
 
   build-linux-x64:
     name: Linux x64
-    needs: validate
+    needs: verify-source
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -233,7 +260,7 @@ jobs:
       - name: Prepare packaged application
         run: npm run b
 
-      - name: Verify packaged application excludes Codex runtime
+      - name: Verify packaged application excludes forbidden runtimes
         run: npm run verify-mini-artifact
 
       - name: Prepare electron-builder configuration

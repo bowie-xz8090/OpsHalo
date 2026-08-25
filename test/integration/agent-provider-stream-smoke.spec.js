@@ -5,7 +5,6 @@ const path = require('node:path')
 
 const appRoot = process.env.OPSHALO_APP_ROOT || path.resolve(__dirname, '../../work/app')
 const { OpenAICompatibleHarnessAdapter } = require(path.join(appRoot, 'agent/harness/openai-harness-adapter'))
-const { StrandsHarnessAdapter } = require(path.join(appRoot, 'agent/harness/strands-harness-adapter'))
 
 const actionSelection = {
   outcome: 'ask',
@@ -18,20 +17,6 @@ const actionSelection = {
   expectedObservation: null,
   verificationPlanJson: null,
   message: 'Which service should be inspected?'
-}
-
-const strandsDecision = {
-  schemaVersion: 1,
-  goalStatus: 'need_user',
-  planSummary: 'Need a service name.',
-  reasonSummary: 'The target service is not specified.',
-  knownFactIds: [],
-  missingInformation: ['service name'],
-  expectedObservation: null,
-  action: null,
-  readProbeBundleJson: null,
-  completionCriteria: [],
-  userQuestion: 'Which service should be inspected?'
 }
 
 test('OpenAI-compatible adapter completes a real loopback HTTP/SSE stream', async t => {
@@ -47,22 +32,6 @@ test('OpenAI-compatible adapter completes a real loopback HTTP/SSE stream', asyn
   assert.equal(events.at(-1).decision.userQuestion, actionSelection.message)
   assert.ok(events.some(event => event.type === 'usage'))
   assert.deepEqual(fixture.requests.map(item => item.toolName), ['submit_agent_decision'])
-  assert.ok(fixture.requests.every(item => item.stream === true && item.authHeaderSeen))
-})
-
-test('Strands SDK adapter completes a real loopback HTTP/SSE stream', async t => {
-  const fixture = await startProviderFixture()
-  t.after(() => fixture.close())
-  const adapter = new StrandsHarnessAdapter(config(fixture.baseURL))
-  t.after(() => adapter.dispose())
-
-  const events = await collect(adapter.runTurn(input(), new AbortController().signal))
-
-  assert.equal(events.at(-1).type, 'decision.completed')
-  assert.equal(events.at(-1).decision.goalStatus, 'need_user')
-  assert.equal(events.at(-1).decision.userQuestion, strandsDecision.userQuestion)
-  assert.ok(events.some(event => event.type === 'usage'))
-  assert.deepEqual(fixture.requests.map(item => item.toolName), ['strands_structured_output'])
   assert.ok(fixture.requests.every(item => item.stream === true && item.authHeaderSeen))
 })
 
@@ -131,7 +100,7 @@ async function startProviderFixture () {
       toolName,
       authHeaderSeen: /^Bearer\s+\S+$/i.test(String(req.headers.authorization || ''))
     })
-    const args = JSON.stringify(toolName === 'strands_structured_output' ? strandsDecision : actionSelection)
+    const args = JSON.stringify(actionSelection)
     const splitAt = Math.max(1, Math.floor(args.length / 2))
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
