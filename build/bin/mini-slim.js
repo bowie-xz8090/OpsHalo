@@ -64,6 +64,8 @@ function slimInstalledModules (nm = 'work/app/node_modules') {
   }
   removeNonRuntimePackageFiles(nm)
   removeCommonJsRuntimeAlternates(nm)
+  slimCommonJsCryptoRuntime(nm)
+  slimZodLocales(nm)
   slimNodePty(`${nm}/node-pty`)
 }
 
@@ -98,6 +100,67 @@ function removeCommonJsRuntimeAlternates (nm) {
   removeUnusedFontListEntries(nm)
   removeMatchingFiles(resolve(nm, 'zod/v4'), name => name.endsWith('.js'))
   echo('[mini-slim] removed unused ESM/browser alternates from CommonJS main-process dependencies')
+}
+
+function slimCommonJsCryptoRuntime (nm) {
+  keepJavaScriptFiles(resolve(nm, '@noble/ciphers'), new Set([
+    '_polyval.js',
+    'utils.js'
+  ]))
+  keepJavaScriptFiles(resolve(nm, '@noble/curves'), new Set([
+    'utils.js',
+    'abstract/curve.js',
+    'abstract/modular.js',
+    'abstract/utils.js',
+    'abstract/weierstrass.js'
+  ]))
+  for (const root of [
+    resolve(nm, '@noble/curves/node_modules/@noble/hashes'),
+    resolve(nm, 'sm-crypto-v2/node_modules/@noble/hashes')
+  ]) {
+    keepJavaScriptFiles(root, new Set(['cryptoNode.js', 'hkdf.js', 'hmac.js', 'utils.js']))
+  }
+  keepJavaScriptFiles(resolve(nm, 'tweetnacl'), new Set(['nacl-fast.js']))
+  echo('[mini-slim] kept only the CommonJS crypto files loaded by SSH SM2 and TweetNaCl')
+}
+
+function slimZodLocales (nm) {
+  const localeImport = 'exports.locales = __importStar(require("../locales/index.cjs"));'
+  const importers = [
+    resolve(nm, 'zod/v4/classic/external.cjs'),
+    resolve(nm, 'zod/v4/core/index.cjs')
+  ]
+  if (!fs.existsSync(importers[0])) return
+  for (const importer of importers) {
+    const source = fs.readFileSync(importer, 'utf8')
+    const replacement = 'exports.locales = Object.freeze({});'
+    if (!source.includes(localeImport) && !source.includes(replacement)) {
+      throw new Error(`Unsupported Zod runtime layout: eager locale import was not found in ${importer}`)
+    }
+    fs.writeFileSync(importer, source.replace(localeImport, replacement))
+  }
+  const locales = resolve(nm, 'zod/v4/locales')
+  removeMatchingFiles(locales, name => name.endsWith('.cjs') && name !== 'en.cjs')
+  echo('[mini-slim] kept the default English Zod locale without eagerly packaging unused translations')
+}
+
+function keepJavaScriptFiles (root, keep) {
+  if (!fs.existsSync(root)) return
+  function visit (current) {
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      const absolute = resolve(current, entry.name)
+      if (entry.isSymbolicLink()) continue
+      if (entry.isDirectory()) {
+        if (entry.name === 'node_modules') continue
+        visit(absolute)
+        continue
+      }
+      if (!entry.isFile() || !/\.[cm]?js$/i.test(entry.name)) continue
+      const relative = require('path').relative(root, absolute).split(require('path').sep).join('/')
+      if (!keep.has(relative)) fs.rmSync(absolute, { force: true })
+    }
+  }
+  visit(root)
 }
 
 function removeUnusedFontListEntries (nm) {
@@ -159,6 +222,9 @@ module.exports = {
   slimInstalledModules,
   removeNonRuntimePackageFiles,
   removeCommonJsRuntimeAlternates,
+  slimCommonJsCryptoRuntime,
+  slimZodLocales,
+  keepJavaScriptFiles,
   removeUnusedFontListEntries,
   isNonRuntimePackageFile,
   NON_RUNTIME_DIRECTORIES

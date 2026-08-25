@@ -28,6 +28,8 @@ const removedModules = [
   '@aws-sdk',
   '@smithy',
   'openai',
+  'electerm-sync',
+  'jsonwebtoken',
   '@electerm/ftp-srv',
   '@novnc/novnc',
   'basic-ftp',
