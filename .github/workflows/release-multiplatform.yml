@@ -120,7 +120,7 @@ jobs:
       - name: Enforce Windows release size limits
         run: npm run verify-release-size -- dist
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: release-windows-x64
@@ -177,7 +177,7 @@ jobs:
       - name: Enforce macOS release size limit
         run: npm run verify-release-size -- dist
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: release-macos-arm64
@@ -232,7 +232,7 @@ jobs:
       - name: Enforce macOS release size limit
         run: npm run verify-release-size -- dist
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: release-macos-x64
@@ -280,7 +280,7 @@ jobs:
       - name: Enforce Linux release size limits
         run: npm run verify-release-size -- dist
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: release-linux-x64
