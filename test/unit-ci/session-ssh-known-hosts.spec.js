@@ -4,7 +4,6 @@ const crypto = require('crypto')
 const fs = require('fs')
 const os = require('os')
 const { join } = require('path')
-const { generateKeyPairSync } = require('@electerm/ssh2/lib/keygen.js')
 
 const {
   appendKnownHost,
@@ -17,9 +16,18 @@ const {
 } = require('../../src/app/server/ssh-known-hosts')
 
 function createHostKey (label) {
-  const pair = generateKeyPairSync('ed25519')
-  const publicKey = `${pair.public} ${label}`.trim()
-  return Buffer.from(publicKey.split(/\s+/)[1], 'base64')
+  const keyType = Buffer.from('ssh-ed25519')
+  const keyMaterial = crypto.createHash('sha256').update(label).digest()
+  const hostKey = Buffer.alloc(4 + keyType.length + 4 + keyMaterial.length)
+  let offset = 0
+  hostKey.writeUInt32BE(keyType.length, offset)
+  offset += 4
+  keyType.copy(hostKey, offset)
+  offset += keyType.length
+  hostKey.writeUInt32BE(keyMaterial.length, offset)
+  offset += 4
+  keyMaterial.copy(hostKey, offset)
+  return hostKey
 }
 
 describe('ssh known_hosts verification', () => {
