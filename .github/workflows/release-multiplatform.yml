@@ -164,11 +164,11 @@ jobs:
       - name: Prepare electron-builder configuration
         run: npm run pb
 
-      - name: Disable macOS notarization
+      - name: Configure ad-hoc macOS signing
         run: |
-          node -e "const fs=require('fs'); const p='electron-builder.json'; const j=JSON.parse(fs.readFileSync(p,'utf8')); if (j.mac) j.mac.notarize=false; fs.writeFileSync(p, JSON.stringify(j,null,2)+'\n')"
+          node -e "const fs=require('fs'); const p='electron-builder.json'; const j=JSON.parse(fs.readFileSync(p,'utf8')); if (j.mac) Object.assign(j.mac,{notarize:false,identity:'-',entitlements:'./build/entitlements.adhoc.plist',entitlementsInherit:'./build/entitlements.adhoc.plist'}); fs.writeFileSync(p, JSON.stringify(j,null,2)+'\n')"
 
-      - name: Build unsigned macOS ARM64 DMG
+      - name: Build ad-hoc signed macOS ARM64 DMG
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: npx electron-builder --mac dmg --arm64 --publish never
@@ -218,11 +218,11 @@ jobs:
       - name: Prepare electron-builder configuration
         run: npm run pb
 
-      - name: Disable macOS notarization
+      - name: Configure ad-hoc macOS signing
         run: |
-          node -e "const fs=require('fs'); const p='electron-builder.json'; const j=JSON.parse(fs.readFileSync(p,'utf8')); if (j.mac) j.mac.notarize=false; fs.writeFileSync(p, JSON.stringify(j,null,2)+'\n')"
+          node -e "const fs=require('fs'); const p='electron-builder.json'; const j=JSON.parse(fs.readFileSync(p,'utf8')); if (j.mac) Object.assign(j.mac,{notarize:false,identity:'-',entitlements:'./build/entitlements.adhoc.plist',entitlementsInherit:'./build/entitlements.adhoc.plist'}); fs.writeFileSync(p, JSON.stringify(j,null,2)+'\n')"
 
-      - name: Build unsigned macOS x64 DMG
+      - name: Build ad-hoc signed macOS x64 DMG
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: npx electron-builder --mac dmg --x64 --publish never

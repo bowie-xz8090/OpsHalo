@@ -83,6 +83,38 @@ test('packaged OpsHalo removes the Electron default app fallback', () => {
   assert.match(afterPack, /unlinkSync\(defaultApp\)/)
   assert.match(afterPack, /assertPackagedRuntimePolicy\(resourcesDir\)/)
   assert.match(afterPack, /MAX_APP_ASAR_BYTES = 18 \* 1024 \* 1024/)
+  assert.match(afterPack, /stripUpstreamRuntimeSignatures\(context\)/)
+})
+
+test('release packaging uses solid NSIS compression and excludes native build headers', () => {
+  const config = require('../../build/electron-builder.json')
+  const workflow = fs.readFileSync(path.join(root, '.github/workflows/release-multiplatform.yml'), 'utf8')
+  const adHocEntitlements = fs.readFileSync(path.join(root, 'build/entitlements.adhoc.plist'), 'utf8')
+  assert.equal(config.compression, 'maximum')
+  assert.equal(config.nsis.differentialPackage, false)
+  assert.ok(config.files.includes('!**/node-addon-api{,/**}'))
+  assert.match(workflow, /identity:'-'/)
+  assert.match(workflow, /entitlements\.adhoc\.plist/)
+  assert.match(adHocEntitlements, /com\.apple\.security\.cs\.disable-library-validation/)
+})
+
+test('PE signature cleanup removes only an end-of-file certificate table', t => {
+  const { stripPeCertificateTable } = require('../../build/bin/after-pack')
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'opshalo-pe-signature-'))
+  t.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }))
+  const signed = path.join(tempRoot, 'signed.exe')
+  const buffer = Buffer.alloc(512)
+  buffer.writeUInt16LE(0x5a4d, 0)
+  buffer.writeUInt32LE(128, 0x3c)
+  buffer.write('PE\u0000\u0000', 128, 'ascii')
+  buffer.writeUInt16LE(0x20b, 152)
+  buffer.writeUInt32LE(400, 152 + 112 + (8 * 4))
+  buffer.writeUInt32LE(112, 152 + 112 + (8 * 4) + 4)
+  buffer.fill(0x7f, 400)
+  fs.writeFileSync(signed, buffer)
+
+  assert.equal(stripPeCertificateTable(signed), 112)
+  assert.equal(fs.statSync(signed).size, 400)
 })
 
 test('node-pty cleanup preserves every Unix runtime binary', t => {
@@ -102,6 +134,36 @@ test('node-pty cleanup preserves every Unix runtime binary', t => {
   assert.equal(fs.existsSync(path.join(release, 'compile.log')), false)
 })
 
+test('package cleanup keeps CommonJS and current-platform runtime entries', t => {
+  const { removeCommonJsRuntimeAlternates } = require('../../build/bin/mini-slim')
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'opshalo-runtime-alternates-'))
+  t.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }))
+  const files = [
+    '@electerm/electerm-locales/dist/cjs/index.js',
+    '@electerm/electerm-locales/dist/esm/index.mjs',
+    '@electerm/electerm-themes/dist/index.js',
+    '@electerm/electerm-themes/dist/themes/source.txt',
+    'font-list/demo.js',
+    'font-list/libs/darwin/index.js',
+    'font-list/libs/linux/index.js',
+    'font-list/libs/win32/index.js'
+  ]
+  for (const relative of files) {
+    const absolute = path.join(tempRoot, relative)
+    fs.mkdirSync(path.dirname(absolute), { recursive: true })
+    fs.writeFileSync(absolute, relative)
+  }
+
+  removeCommonJsRuntimeAlternates(tempRoot)
+
+  assert.equal(fs.existsSync(path.join(tempRoot, '@electerm/electerm-locales/dist/cjs/index.js')), true)
+  assert.equal(fs.existsSync(path.join(tempRoot, '@electerm/electerm-locales/dist/esm')), false)
+  assert.equal(fs.existsSync(path.join(tempRoot, '@electerm/electerm-themes/dist/index.js')), true)
+  assert.equal(fs.existsSync(path.join(tempRoot, '@electerm/electerm-themes/dist/themes')), false)
+  assert.equal(fs.existsSync(path.join(tempRoot, 'font-list/libs', process.platform, 'index.js')), true)
+  assert.equal(fs.existsSync(path.join(tempRoot, 'font-list/demo.js')), false)
+})
+
 test('release artifact scan rejects Codex and retired Agent runtime entries', () => {
   const { isForbiddenCodexPath, isForbiddenRetiredAgentPath, requiredRuntimePaths } = require('../../build/bin/verify-mini-artifact')
   assert.equal(isForbiddenCodexPath('/node_modules/@openai/codex-darwin-arm64/vendor/bin/codex'), true)
@@ -114,8 +176,10 @@ test('release artifact scan rejects Codex and retired Agent runtime entries', ()
   assert.equal(isForbiddenRetiredAgentPath('/agent/harness/strands-harness-adapter.js'), true)
   assert.equal(isForbiddenRetiredAgentPath('/agent/harness/openai-harness-adapter.js'), false)
   assert.equal(requiredRuntimePaths.includes('node_modules/node-pty/build/Release/pty.node'), true)
-  if (process.platform !== 'win32') {
+  if (process.platform === 'darwin') {
     assert.equal(requiredRuntimePaths.includes('node_modules/node-pty/build/Release/spawn-helper'), true)
+  } else {
+    assert.equal(requiredRuntimePaths.includes('node_modules/node-pty/build/Release/spawn-helper'), false)
   }
 })
 
