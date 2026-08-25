@@ -91,7 +91,7 @@ Provider 的 reasoning token、encrypted reasoning item、内部 chain-of-though
 
 ```ts
 interface AgentProviderSession {
-  readonly providerType: 'openai-compatible' | 'codex-subscription' | 'strands'
+  readonly providerType: 'openai-compatible' | 'codex-subscription'
   readonly capabilitySnapshotId: string
   runTurn(input: ProviderTurnInput, signal: AbortSignal): AsyncIterable<ProviderEvent>
   compact?(input: CompactRequest, signal: AbortSignal): Promise<CompactResult>
@@ -101,8 +101,9 @@ interface AgentProviderSession {
 
 - OpenAI Compatible：使用流式 chat/responses 传输；每轮仍由 OpsHalo 编译完整受控上下文，adapter 不依赖服务端隐式记忆。
 - Codex Subscription：账号读取使用最多 5 分钟的 profile cache；每个 task 只启动一个 thread，并在后续 turn 复用；创建时写入显式 model 和 reasoning effort。
-- Strands：每个 task 复用同一 Agent 实例；工具仍为无执行权限的规划 facade，真正执行由 OpsHalo 完成。
 - Provider session id 可持久化为不敏感元数据，但 OAuth token、API key 和原始 Provider transcript 不进入 task snapshot。
+
+从 1.0.27 起 Strands 不再是可创建的 Provider Session。配置加载时将历史 `agentHarnessAdapter=strands` 归一化为 `openai_compatible`，且保存时不再写回该旧字段；历史 task、指标和同步载荷中的 `strands` 标识仍可作为只读枚举解析，但不得重新加载 Strands SDK 或创建 Strands Agent。
 
 任务恢复时默认重新创建 Provider Session，并用 OpsHalo WorkingMemory 重建最小上下文。不得把恢复依赖于 Provider thread 永久存在。
 
@@ -386,7 +387,18 @@ Preload 增加 `getRuntimeStatus()`、`cancelRuntimeDownload()` 和 `onRuntimeEv
 
 配置页在缺失状态把固定压缩大小显示在两个账号按钮上。用户点击后显示下载进度和取消入口；验证完成自动继续 OAuth。失败保留可读错误和重试入口。Agent 模式在运行时缺失时只引导到配置页，不得后台下载。
 
-发布工作流在各目标平台先于打包执行真实固定运行时 smoke，并在临时目录清理测试缓存。成品扫描拒绝任何 Codex npm 包或原生二进制；Windows installer 必须小于 100 MB，macOS DMG、Linux DEB/RPM/AppImage 必须小于 130 MB，Linux/Windows tar.gz 必须小于 160 MB。
+发布工作流在各目标平台先于打包执行真实固定运行时 smoke，并在临时目录清理测试缓存。成品扫描拒绝任何 Codex npm 包或原生二进制；1.0.26 的体积门禁保持为 Windows installer 小于 100 MB，macOS DMG、Linux DEB/RPM/AppImage 小于 130 MB，Linux/Windows tar.gz 小于 160 MB。
+
+### 14. Electron 稳妥瘦身与 1.0.27 发布
+
+本轮继续使用 Electron，不迁移 SSH/SFTP、PTY、Codex 进程管理、代理、托盘、深链接和安全 IPC 到另一套桌面运行时。瘦身只作用于前端不可达的 Strands 路径、其专用依赖和确认不影响运行时的包内开发文件，不删除 GPU、SwiftShader、ffmpeg、语言运行支持或任何用户可见能力。
+
+- AI 配置页只保留 OpenAI Compatible 与 ChatGPT/Codex 账号两种入口，不再携带隐藏的 `agentHarnessAdapter` 表单字段。
+- 主进程以归一化的有效配置创建 Harness；旧 `strands` 配置等价迁移为 `openai_compatible`，账号集合、当前账号、Agent 开关及其他 AI 字段原样保留。
+- 删除 Strands adapter 及 `@strands-agents/sdk`、`openai`、`@modelcontextprotocol/sdk`、`@opentelemetry/api`、AWS/Smithy 和项目未使用的顶层 `jsonwebtoken` 声明。历史 schema 可接受旧枚举，但生产代码不得导入已退出的 Agent 包；`electerm-sync` 实际使用的 JWT 传递依赖保留。
+- 生产依赖清理可删除 source map、类型声明、测试、示例和未加载入口，必须保留许可证与实际加载文件。
+- `afterPack` 和独立成品扫描同时拒绝上述依赖、Codex 原生运行时和已删除 adapter；最终 `app.asar` 必须不超过 18 MiB。
+- v1.0.27 体积门禁为 Windows installer `<= 90 MiB`、Windows tar.gz `< 120 MiB`、macOS DMG `< 95 MiB`、Linux DEB/RPM/AppImage `< 85 MiB`、Linux tar.gz `< 105 MiB`。若超限，只继续依赖级清理，不以裁剪运行能力绕过门禁。
 
 ## Detailed Data Contracts
 

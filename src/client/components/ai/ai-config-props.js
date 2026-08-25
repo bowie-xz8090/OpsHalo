@@ -14,8 +14,6 @@ export const aiConfigsArr = [
   'agentModeEnabled',
   'agentMutationEnabled',
   'agentExternalMcpEnabled',
-  'agentHarnessAdapter',
-  'agentCompatibleFallbackEnabled',
   'agentGroundedSynthesisEnabled',
   'agentFastModel',
   'agentPlannerModel',

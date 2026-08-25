@@ -24,6 +24,15 @@ describe('terminal', function () {
       ? 'dir'
       : 'ls'
     await delay(13500)
+    await client.evaluate(() => {
+      let tab = window.store.tabs.find(item => item.id === window.store.activeTabId) || window.store.tabs[0]
+      if (!tab) {
+        window.store.addTab()
+        tab = window.store.tabs.find(item => item.id === window.store.activeTabId) || window.store.tabs[0]
+      }
+      if (!tab) throw new Error('Test requires an available terminal tab')
+      window.store.clickTab(tab.id, tab.batch)
+    })
     await basicTerminalTest(client, cmd)
     await electronApp.close().catch(console.log)
   })

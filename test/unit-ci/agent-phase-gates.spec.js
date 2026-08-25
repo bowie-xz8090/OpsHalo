@@ -14,7 +14,9 @@ function source (relativePath) {
 test('G0 runtime baseline is pinned and defaults fail closed', () => {
   const pkg = JSON.parse(source('package.json'))
   assert.match(pkg.engines.node, /20\.19/)
-  assert.equal(pkg.dependencies['@strands-agents/sdk'], '1.13.0')
+  for (const removed of ['@strands-agents/sdk', '@modelcontextprotocol/sdk', '@opentelemetry/api', 'openai', 'jsonwebtoken']) {
+    assert.equal(pkg.dependencies[removed], undefined, removed)
+  }
   const defaults = source('src/app/common/default-setting.js')
   assert.match(defaults, /agentModeEnabled:\s*false/)
   assert.match(defaults, /agentMutationEnabled:\s*false/)
@@ -28,7 +30,8 @@ test('G1-G3 execution boundaries and UI cancellation adapters are present', () =
   assert.match(source('src/app/widgets/widget-mcp-server.js'), /assertLegacyMcpGatewayBoundary/)
   assert.match(source('src/app/server/agent-dispatch.js'), /verifyExternal/)
   assert.match(source('src/app/server/session-api.js'), /verifyExternal/)
-  assert.match(source('src/app/agent/harness/strands-harness-adapter.js'), /tools:\s*\[\]/)
+  assert.equal(fs.existsSync(path.join(root, 'src/app/agent/harness/strands-harness-adapter.js')), false)
+  assert.match(source('src/app/agent/harness/harness-factory.js'), /OpenAICompatibleHarnessAdapter/)
   assert.match(source('src/client/components/shortcuts/shortcut-handler.js'), /resolveCtrlCAction/)
 })
 

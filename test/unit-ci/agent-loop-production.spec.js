@@ -19,7 +19,6 @@ const { analyzeShell } = require('../../src/app/agent/policy/shell-analyzer')
 const { PolicyEngine } = require('../../src/app/agent/policy/policy-engine')
 const { normalizeIntent } = require('../../src/app/agent/tools/intent-normalizer')
 const { parseResultView, parseListeningPortsInspection } = require('../../src/app/agent/observation/parsers')
-const { invokeAgentWithTimeout } = require('../../src/app/agent/harness/strands-harness-adapter')
 
 test('provider schema errors containing context are not misclassified as context exhaustion', () => {
   const schema = classifyHarnessError(new Error("Invalid schema for response_format: In context=('properties', 'arguments'), 'propertyNames' is not permitted. code=invalid_json_schema"))
@@ -250,13 +249,6 @@ test('every reviewed shell command allows only one-shot approval', () => {
   const policy = new PolicyEngine().evaluate({ taskId: 'task_nginx_path_12345' }, registered.definition, intent)
   assert.equal(policy.outcome, 'require_approval')
   assert.deepEqual(policy.allowedApprovalScopes, ['once'])
-})
-
-test('Strands planning has a hard deadline and cancels the SDK request', async () => {
-  let cancelled = 0
-  const agent = { invoke: () => new Promise(() => {}), cancel: () => { cancelled++ } }
-  await assert.rejects(invokeAgentWithTimeout(agent, 'prompt', undefined, 20), error => error.code === 'ETIMEDOUT')
-  assert.equal(cancelled, 1)
 })
 
 function memory () {

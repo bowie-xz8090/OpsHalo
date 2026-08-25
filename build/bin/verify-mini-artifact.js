@@ -16,11 +16,18 @@ const removedRelativePaths = [
   'server/telnet.js',
   'lib/serial-port.js',
   'widgets/widget-batch-op.js',
-  'widgets/widget-local-ftp-server.js'
+  'widgets/widget-local-ftp-server.js',
+  'agent/harness/strands-harness-adapter.js'
 ]
 
 const removedModules = [
   '@openai/codex',
+  '@strands-agents/sdk',
+  '@modelcontextprotocol/sdk',
+  '@opentelemetry/api',
+  '@aws-sdk',
+  '@smithy',
+  'openai',
   '@electerm/ftp-srv',
   '@novnc/novnc',
   'basic-ftp',
@@ -31,10 +38,10 @@ const removedModules = [
 ]
 
 const requiredRuntimePaths = [
-  'node_modules/@strands-agents/sdk/dist/src/agent/agent.js',
-  'node_modules/@strands-agents/sdk/dist/src/models/openai/model.js',
-  'node_modules/@strands-agents/sdk/dist/src/tools/structured-output-tool.js',
-  'node_modules/@strands-agents/sdk/dist/src/tools/tool.js'
+  'agent/harness/openai-harness-adapter.js',
+  'agent/harness/codex-app-server-adapter.js',
+  'node_modules/node-pty/build/Release/pty.node',
+  ...(process.platform === 'win32' ? [] : ['node_modules/node-pty/build/Release/spawn-helper'])
 ]
 
 function verifyMiniArtifact (artifactRoot = path.resolve(__dirname, '../../work/app')) {
@@ -47,6 +54,7 @@ function verifyMiniArtifact (artifactRoot = path.resolve(__dirname, '../../work/
     if (fs.existsSync(path.join(artifactRoot, 'node_modules', ...moduleName.split('/')))) violations.push(`node_modules/${moduleName}`)
   }
   collectForbiddenCodexEntries(artifactRoot, artifactRoot, violations)
+  collectForbiddenRetiredAgentEntries(artifactRoot, artifactRoot, violations)
   for (const relative of requiredRuntimePaths) {
     if (!fs.existsSync(path.join(artifactRoot, relative))) violations.push(`missing:${relative}`)
   }
@@ -86,9 +94,43 @@ function isForbiddenCodexPath (relativePath) {
     /(?:^|\/)(?:codex|codex\.exe|codex-code-mode-host(?:\.exe)?|codex-command-runner\.exe|codex-windows-sandbox-setup\.exe|codex-linux-sandbox)$/.test(normalized)
 }
 
+function collectForbiddenRetiredAgentEntries (root, current, violations) {
+  let entries = []
+  try { entries = fs.readdirSync(current, { withFileTypes: true }) } catch (_) { return }
+  for (const entry of entries) {
+    const absolute = path.join(current, entry.name)
+    const relative = path.relative(root, absolute)
+    if (entry.isSymbolicLink()) continue
+    if (entry.isDirectory()) {
+      if (isForbiddenRetiredAgentPath(relative)) {
+        violations.push(relative)
+        continue
+      }
+      collectForbiddenRetiredAgentEntries(root, absolute, violations)
+      continue
+    }
+    if (entry.isFile() && isForbiddenRetiredAgentPath(relative)) violations.push(relative)
+  }
+}
+
+function isForbiddenRetiredAgentPath (relativePath) {
+  const normalized = String(relativePath || '').split(path.sep).join('/').replace(/^\/+/, '')
+  return /(?:^|\/)agent\/harness\/strands-harness-adapter\.js$/.test(normalized) ||
+    /(?:^|\/)node_modules\/(?:@strands-agents\/sdk|@modelcontextprotocol\/sdk|@opentelemetry\/api|@aws-sdk|@smithy|openai)(?:\/|$)/.test(normalized)
+}
+
 if (require.main === module) {
   const result = verifyMiniArtifact(process.argv[2])
   console.log(`Mini artifact verified: ${result.checkedPaths} removed paths, ${result.checkedModules} removed modules, ${result.checkedRuntimePaths} required runtime paths`)
 }
 
-module.exports = { verifyMiniArtifact, removedRelativePaths, removedModules, requiredRuntimePaths, collectForbiddenCodexEntries, isForbiddenCodexPath }
+module.exports = {
+  verifyMiniArtifact,
+  removedRelativePaths,
+  removedModules,
+  requiredRuntimePaths,
+  collectForbiddenCodexEntries,
+  isForbiddenCodexPath,
+  collectForbiddenRetiredAgentEntries,
+  isForbiddenRetiredAgentPath
+}

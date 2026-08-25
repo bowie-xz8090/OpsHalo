@@ -3,6 +3,10 @@ const { normalizeRuntimeV2Flags } = require('./rollout/feature-rollout')
 
 const SCHEMA_VERSION = 1
 const POLICY_VERSION = 'agent-policy-v1'
+const LEGACY_AGENT_CONFIG_FIELDS = Object.freeze([
+  'agentHarnessAdapter',
+  'agentCompatibleFallbackEnabled'
+])
 
 const defaults = Object.freeze({
   maxReactSteps: 12,
@@ -57,6 +61,16 @@ function normalizeAiBackendSelection (config = {}) {
   }
 }
 
+function normalizeLegacyAgentConfig (config = {}) {
+  const normalized = { ...config }
+  for (const field of LEGACY_AGENT_CONFIG_FIELDS) delete normalized[field]
+  return normalized
+}
+
+function hasLegacyAgentConfig (config = {}) {
+  return LEGACY_AGENT_CONFIG_FIELDS.some(field => Object.prototype.hasOwnProperty.call(config, field))
+}
+
 function normalizeFeatureFlags (config = {}) {
   const agentModeEnabled = config.agentModeEnabled === true
   const runtimeV2 = normalizeRuntimeV2Flags(config)
@@ -79,5 +93,8 @@ module.exports = {
   codexAccountsRoot,
   codexRuntimeRoot,
   normalizeAiBackendSelection,
-  normalizeFeatureFlags
+  normalizeFeatureFlags,
+  normalizeLegacyAgentConfig,
+  hasLegacyAgentConfig,
+  LEGACY_AGENT_CONFIG_FIELDS
 }

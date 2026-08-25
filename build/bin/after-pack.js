@@ -5,7 +5,14 @@
 const fs = require('fs')
 const path = require('path')
 const asar = require('@electron/asar')
-const { collectForbiddenCodexEntries, isForbiddenCodexPath } = require('./verify-mini-artifact')
+const {
+  collectForbiddenCodexEntries,
+  isForbiddenCodexPath,
+  collectForbiddenRetiredAgentEntries,
+  isForbiddenRetiredAgentPath
+} = require('./verify-mini-artifact')
+
+const MAX_APP_ASAR_BYTES = 18 * 1024 * 1024
 
 exports.default = async function afterPack (context) {
   const appOutDir = context.appOutDir
@@ -23,16 +30,23 @@ exports.default = async function afterPack (context) {
     fs.unlinkSync(defaultApp)
     console.log('[mini-slim] removed Electron default_app.asar fallback')
   }
-  assertNoCodexRuntime(resourcesDir)
+  assertPackagedRuntimePolicy(resourcesDir)
 }
 
-function assertNoCodexRuntime (resourcesDir) {
+function assertPackagedRuntimePolicy (resourcesDir) {
   const appAsar = path.join(resourcesDir, 'app.asar')
   if (!fs.existsSync(appAsar)) throw new Error(`Packaged app.asar is missing: ${appAsar}`)
-  const violations = asar.listPackage(appAsar).filter(isForbiddenCodexPath)
+  const appAsarBytes = fs.statSync(appAsar).size
+  if (appAsarBytes > MAX_APP_ASAR_BYTES) {
+    throw new Error(`Packaged app.asar exceeds 18 MiB: ${(appAsarBytes / 1024 / 1024).toFixed(1)} MiB`)
+  }
+  const violations = asar.listPackage(appAsar).filter(entry => isForbiddenCodexPath(entry) || isForbiddenRetiredAgentPath(entry))
   collectForbiddenCodexEntries(resourcesDir, resourcesDir, violations)
-  if (violations.length) throw new Error(`Packaged application contains Codex runtime:\n${[...new Set(violations)].join('\n')}`)
-  console.log('[runtime-gate] packaged application contains no Codex runtime')
+  collectForbiddenRetiredAgentEntries(resourcesDir, resourcesDir, violations)
+  if (violations.length) throw new Error(`Packaged application contains forbidden runtime entries:\n${[...new Set(violations)].join('\n')}`)
+  console.log(`[runtime-gate] app.asar ${(appAsarBytes / 1024 / 1024).toFixed(1)} MiB; no Codex or retired Agent runtime`)
 }
 
-module.exports.assertNoCodexRuntime = assertNoCodexRuntime
+module.exports.assertPackagedRuntimePolicy = assertPackagedRuntimePolicy
+module.exports.assertNoCodexRuntime = assertPackagedRuntimePolicy
+module.exports.MAX_APP_ASAR_BYTES = MAX_APP_ASAR_BYTES

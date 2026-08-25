@@ -112,7 +112,7 @@ Preload SHALL 只暴露 `getRuntimeStatus()`、`cancelRuntimeDownload()` 和 `on
 
 ### Requirement: 发布流水线必须验证运行时和成品体积
 
-各平台 CI SHALL 从固定官方地址在临时目录完成完整性校验和 App Server 初始化 smoke，且测试缓存不得进入成品。发布门禁 SHALL 要求 Windows installer 小于 100 MB，macOS DMG 小于 130 MB，Linux DEB/RPM/AppImage 小于 130 MB，Linux/Windows tar.gz 小于 160 MB，并生成 `SHA256SUMS.txt`。
+各平台 CI SHALL 从固定官方地址在临时目录完成完整性校验和 App Server 初始化 smoke，且测试缓存不得进入成品。v1.0.26 发布门禁 SHALL 要求 Windows installer 小于 100 MB，macOS DMG 小于 130 MB，Linux DEB/RPM/AppImage 小于 130 MB，Linux/Windows tar.gz 小于 160 MB，并生成 `SHA256SUMS.txt`。后续版本 MAY 设置更严格且平台细分的门禁。
 
 #### Scenario: 成品超出体积上限
 

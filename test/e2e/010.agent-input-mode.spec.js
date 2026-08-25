@@ -212,7 +212,7 @@ test.describe('per-tab Shell and Agent input mode', () => {
         pendingApproval: approval
       })
       await expect(decorations).toHaveCount(1)
-      expect(await client.evaluate(tabId => {
+      await expect.poll(() => client.evaluate(tabId => {
         const terminal = window.refs.get(`term-${tabId}`)
         return {
           status: terminal._agentPendingNativeSessions.get('task-embedded-ui-test')?.status,
@@ -506,7 +506,7 @@ test.describe('per-tab Shell and Agent input mode', () => {
       await modal.getByText('ChatGPT / Codex 账号', { exact: true }).click()
       await expect(modal.getByText('使用 ChatGPT / Codex 订阅账号')).toBeVisible()
       await expect(modal.getByText('高级：自定义 Codex App Server（可选）')).toBeVisible()
-      await expect(modal.locator('input[placeholder="通常留空，使用安装包内置版本"]')).toBeVisible()
+      await expect(modal.locator('input[placeholder="通常留空，自动检测或按需下载"]')).toBeVisible()
       await expect(modal.locator('input[value="https://api.example.test/v1"]')).toHaveCount(0)
 
       await modal.getByText('API Key', { exact: true }).click()
@@ -539,8 +539,7 @@ test.describe('per-tab Shell and Agent input mode', () => {
           languageAI: 'Chinese',
           agentModeEnabled: true,
           agentMutationEnabled: false,
-          agentExternalMcpEnabled: false,
-          agentHarnessAdapter: 'openai_compatible'
+          agentExternalMcpEnabled: false
         }]
         const key = window.pre.runSync('getStorageKey')
         const input = new TextEncoder().encode(JSON.stringify(history))

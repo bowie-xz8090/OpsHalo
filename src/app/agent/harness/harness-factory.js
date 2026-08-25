@@ -1,4 +1,3 @@
-const { StrandsHarnessAdapter } = require('./strands-harness-adapter')
 const { OpenAICompatibleHarnessAdapter } = require('./openai-harness-adapter')
 const { StrictJsonHarnessAdapter } = require('./strict-json-adapter')
 const { CodexAppServerHarnessAdapter } = require('./codex-app-server-adapter')
@@ -17,13 +16,7 @@ class HarnessFactory {
   }
 
   selectedAdapter (config = this.config()) {
-    let selected = ['strands', 'openai_compatible', 'strict_json'].includes(config.agentHarnessAdapter)
-      ? config.agentHarnessAdapter
-      : 'openai_compatible'
-    if (config.agentStructuredMode === 'json') selected = 'strict_json'
-    return selected === 'strands' && requiresDirectCompatibleAdapter(config.baseURLAI)
-      ? 'openai_compatible'
-      : selected
+    return config.agentStructuredMode === 'json' ? 'strict_json' : 'openai_compatible'
   }
 
   selection () {
@@ -60,7 +53,7 @@ class HarnessFactory {
 
   async create (record) {
     const config = configForSelection(this.config(), record?.harness)
-    const selection = record?.harness || this.selection()
+    const selection = normalizeLegacyHarnessSelection(record?.harness || this.selection())
     const adapter = selection.adapter
     if (adapter === 'codex_app_server') {
       if (!this.codexManager || !selection.profileId) throw factoryError('CODEX_APP_SERVER_UNAVAILABLE', 'Codex App Server Harness 尚未初始化。')
@@ -93,11 +86,7 @@ class HarnessFactory {
         return result.message?.content
       })
     }
-    return new StrandsHarnessAdapter(config, {
-      compatibleFallback: config.agentCompatibleFallbackEnabled === true
-        ? new OpenAICompatibleHarnessAdapter(config)
-        : null
-    })
+    throw factoryError('HARNESS_ADAPTER_UNSUPPORTED', '当前 AI 适配器已不受支持，请重新保存 AI 配置。')
   }
 }
 
@@ -153,8 +142,14 @@ function providerId (baseURL) {
   try { return new URL(baseURL).hostname } catch (_) { return 'configured-provider' }
 }
 
-function requiresDirectCompatibleAdapter (baseURL) {
-  return /(?:^|\.)dashscope\.aliyuncs\.com$/i.test(providerId(baseURL))
+function normalizeLegacyHarnessSelection (selection) {
+  if (selection?.adapter !== 'strands') return selection
+  return {
+    ...selection,
+    adapter: 'openai_compatible',
+    supportsNativeTools: true,
+    supportsStructuredOutput: true
+  }
 }
 
 function boundedInteger (value, fallback, minimum, maximum) {
@@ -170,4 +165,4 @@ function factoryError (code, safeMessage) {
   return error
 }
 
-module.exports = { HarnessFactory, providerId, factoryError, requiresDirectCompatibleAdapter, boundedInteger, configForSelection, capabilityReportSnapshot, profileConfig }
+module.exports = { HarnessFactory, providerId, factoryError, normalizeLegacyHarnessSelection, boundedInteger, configForSelection, capabilityReportSnapshot, profileConfig }

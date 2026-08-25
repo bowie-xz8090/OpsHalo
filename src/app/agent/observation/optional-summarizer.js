@@ -33,7 +33,7 @@ class OpenAIObservationSummarizer extends OptionalSummarizer {
   async summarize (input, signal, context = {}) {
     const config = this.getConfig()
     const taskAdapter = context.session?.harness?.adapter
-    if (config.agentObservationSummarizerEnabled === false || normalizeAiBackendSelection(config).type !== 'openai_compatible' || ['codex_app_server', 'strands'].includes(taskAdapter)) return null
+    if (config.agentObservationSummarizerEnabled === false || normalizeAiBackendSelection(config).type !== 'openai_compatible' || taskAdapter === 'codex_app_server') return null
     const request = {
       instruction: 'Return exactly one JSON object: {"summary":"string","factIds":["candidate_id"],"evidenceRanges":[{"evidenceId":"evidence://...","start":0,"end":1}]}. Cite only supplied ids and ranges. No Markdown, tools, commands, or hidden reasoning.',
       data: boundedSummarizerInput(input),

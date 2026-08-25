@@ -5,7 +5,7 @@ const os = require('node:os')
 const path = require('node:path')
 const { EventEmitter } = require('node:events')
 const { PassThrough, Writable } = require('node:stream')
-const { normalizeAiBackendSelection } = require('../../src/app/agent/config')
+const { normalizeAiBackendSelection, normalizeLegacyAgentConfig } = require('../../src/app/agent/config')
 const { CodexProfileStore } = require('../../src/app/agent/providers/codex-profile-store')
 const { CodexJsonRpcClient, buildLaunchSpec, minimalEnvironment, sanitizeErrorText } = require('../../src/app/agent/providers/codex-jsonrpc-client')
 const { handleCodexServerRequest } = require('../../src/app/agent/providers/codex-tool-bridge')
@@ -78,13 +78,15 @@ test('blank AI defaults recover the newest protected API configuration without o
   assert.equal(recoverAiConfigFromHistory({}, [{ baseURLAI: 'https://api.example.test/v1', modelAI: 'missing-key' }]).recovered, false)
 })
 
-test('AI settings submission keeps hidden backend values and refreshes live Agent flags', () => {
+test('AI settings submission removes legacy harness fields and refreshes live Agent flags', () => {
   const formSource = fs.readFileSync(path.join(__dirname, '../../src/client/components/ai/ai-config.jsx'), 'utf8')
   const modalSource = fs.readFileSync(path.join(__dirname, '../../src/client/components/ai/ai-config-modal.jsx'), 'utf8')
   const runtimeSource = fs.readFileSync(path.join(__dirname, '../../src/app/agent/index.js'), 'utf8')
   const refreshSource = fs.readFileSync(path.join(__dirname, '../../src/app/agent/runtime-config-refresh.js'), 'utf8')
   const persistenceSource = fs.readFileSync(path.join(__dirname, '../../src/app/lib/user-config-controller.js'), 'utf8')
-  assert.match(formSource, /const normalized = \{\s*\.\.\.initialValues,\s*\.\.\.values,/)
+  assert.match(formSource, /delete safeInitialValues\.agentHarnessAdapter/)
+  assert.match(formSource, /delete safeInitialValues\.agentCompatibleFallbackEnabled/)
+  assert.doesNotMatch(formSource, /name='agentHarnessAdapter'/)
   assert.match(formSource, /await onSubmit\(normalized\)/)
   assert.match(modalSource, /await window\.pre\.runGlobalAsync\('saveUserConfig', nextConfig\)/)
   assert.ok(modalSource.indexOf("await window.pre.runGlobalAsync('saveUserConfig', nextConfig)") < modalSource.indexOf('message.success'))
@@ -100,15 +102,21 @@ test('Electron E2E data is isolated from the real OpsHalo user database', () => 
   assert.match(appOptionsSource, /\.opshalo-e2e-data/)
 })
 
-test('Harness factory pins one backend per task and never selects compatible fallback for Codex', async () => {
+test('legacy Strands config migrates without changing accounts or Agent state', async () => {
   const config = {
     aiBackendType: 'codex_subscription',
     codexProfileId: 'codex_profile_12345',
     agentHarnessAdapter: 'strands',
     agentCompatibleFallbackEnabled: true,
+    agentModeEnabled: true,
     baseURLAI: 'https://api.example.test/v1',
     modelAI: 'inactive-api-model'
   }
+  const migrated = normalizeLegacyAgentConfig(config)
+  assert.equal(migrated.agentHarnessAdapter, undefined)
+  assert.equal(migrated.agentCompatibleFallbackEnabled, undefined)
+  assert.equal(migrated.codexProfileId, config.codexProfileId)
+  assert.equal(migrated.agentModeEnabled, config.agentModeEnabled)
   const factory = new HarnessFactory(() => config, { codexManager: {} })
   const selection = factory.selection()
   assert.equal(selection.adapter, 'codex_app_server')
@@ -116,9 +124,18 @@ test('Harness factory pins one backend per task and never selects compatible fal
   const adapter = await factory.create({ harness: selection })
   assert.ok(adapter instanceof CodexAppServerHarnessAdapter)
   config.aiBackendType = 'openai_compatible'
-  assert.equal(factory.selection().adapter, 'strands')
-  config.baseURLAI = 'https://dashscope.aliyuncs.com/compatible-mode/v1'
   assert.equal(factory.selection().adapter, 'openai_compatible')
+  const legacyTaskAdapter = await factory.create({
+    harness: {
+      adapter: 'strands',
+      modelId: 'legacy-model',
+      providerId: 'legacy-provider',
+      supportsNativeTools: false,
+      supportsStructuredOutput: true,
+      maxContextTokens: 32000
+    }
+  })
+  assert.equal(legacyTaskAdapter.constructor.name, 'OpenAICompatibleHarnessAdapter')
   assert.equal(selection.adapter, 'codex_app_server')
 })
 

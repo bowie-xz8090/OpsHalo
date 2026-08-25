@@ -130,7 +130,6 @@ class ProviderSessionManager {
 
 function providerType (adapter) {
   if (adapter === 'codex_app_server') return 'codex-subscription'
-  if (adapter === 'strands') return 'strands'
   return 'openai-compatible'
 }
 

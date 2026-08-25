@@ -6,7 +6,7 @@ OpsHalo 已有 Agent Harness、安全网关、审批、证据和验证骨架，�
 
 ## What Changes
 
-- 新增 task-scoped Provider Session。一次任务复用同一 Provider 会话、Codex thread 或 Strands Agent，避免每个 ReAct 回合重复登录、探测和建线程。
+- 新增 task-scoped Provider Session。一次任务复用同一 OpenAI-compatible 会话或 Codex thread，避免每个 ReAct 回合重复登录、探测和建线程。
 - 新增统一流式事件协议，传输安全的助手文本增量、Provider 阶段、真实命令输出进度、用量和最终结果；不传输隐藏思维链。
 - 将 SSH/PTY 执行的 stdout/stderr 增量接入 Execution Runtime，在进入 UI、模型和持久化前完成控制字符清洗与密钥脱敏。
 - 保留单写者状态机；仅允许最多三个相互独立、同一当前主机上的低风险只读动作并发，变更、交互、验证依赖和未知风险动作继续串行。
@@ -19,6 +19,8 @@ OpsHalo 已有 Agent Harness、安全网关、审批、证据和验证骨架，�
 - 增强终端输入路由和会话面板：支持明确的 Agent 模式及 `Shift+Enter` 强制自然语言提交，实时展示安全文本、动作和证据状态。
 - 收敛 Mini 发行物的产品边界：只保留前端实际可达的 SSH/SFTP、本地终端、AI、主题、同步与工作区能力；对不可达的遗留会话、组件、服务端实现、依赖和测试先做可达性审计，再成组删除。
 - 从 1.0.26 起不再把 Codex 原生运行时放入安装包；用户显式开始 Codex OAuth 或设备码授权时，主进程从固定官方清单按需下载、校验并原子安装对应平台运行时。
+- 从 1.0.27 起删除前端不可达的 Strands 运行模式、适配器和专用依赖链；旧 `agentHarnessAdapter=strands` 确定性迁移为 `openai_compatible`，历史记录仍可被动读取旧标识。
+- 在不裁剪 GPU、SwiftShader、ffmpeg、语言运行支持或用户可见能力的前提下加强生产依赖清理、成品禁入扫描与平台体积门禁。
 
 ## Capabilities
 
@@ -71,7 +73,7 @@ OpsHalo 已有 Agent Harness、安全网关、审批、证据和验证骨架，�
 - 本地提交确认的 P95 不高于 100 ms，首个安全生命周期事件的 P95 不高于 300 ms。
 - 在基准网络和受支持 Provider 下，首个助手文本增量 P50 不高于 2.5 秒、P95 不高于 8 秒；超出时 UI 持续显示明确阶段并允许取消。
 - 远端命令产生首批 stdout/stderr 后，脱敏的执行进度事件 P95 在 500 ms 内到达 Renderer；不再用单纯 elapsed heartbeat 冒充输出。
-- 同一任务内不重复执行可缓存的 Provider 登录/账号读取，Codex thread、Strands Agent 或 OpenAI-compatible 会话上下文按 task 复用并在结束时释放。
+- 同一任务内不重复执行可缓存的 Provider 登录/账号读取，Codex thread 或 OpenAI-compatible 会话上下文按 task 复用并在结束时释放。
 - 每个新自然语言目标和新证据批次最多触发 1 次 Planner 调用；不得用关键词固定命令跳过首轮语义理解。
 - 普通 Shell 成功输出能生成带 Evidence range 的事实候选；无法可靠解析时明确标记为 observation，而不是编造事实。
 - 最终回答的每个关键结论可追溯到 Evidence/Fact；证据不足、部分成功和未知远端状态不得被润色为成功。
@@ -80,6 +82,8 @@ OpsHalo 已有 Agent Harness、安全网关、审批、证据和验证骨架，�
 - 评测集至少覆盖 30 个确定性场景、10 个失败/取消场景和每个正式支持 Provider 的只读真实 smoke；任何安全回归阻止灰度扩大。
 - Mini 发行物不得再导入或打包 Telnet、Serial、FTP、RDP、VNC、SPICE、Web 等无前端入口的会话实现及其专用依赖；保留的共享模块必须有明确的可达消费者和自动化测试。
 - 安装包不得包含 `@openai/codex*` 或 Codex 原生二进制；Codex Subscription 首次授权可在配置页明确下载固定运行时，OpenAI Compatible 模式不触发下载。
+- 安装包不得包含 Strands、OpenAI SDK、AWS/Smithy、MCP SDK 或 OpenTelemetry 运行时代码；项目不得直接声明未引用的 `jsonwebtoken`，同步组件实际使用的传递依赖保持兼容；`app.asar` 不得超过 18 MiB。
+- v1.0.27 发布资产必须满足 Windows installer 不超过 90 MiB、Windows tar.gz 小于 120 MiB、macOS DMG 小于 95 MiB、Linux DEB/RPM/AppImage 小于 85 MiB、Linux tar.gz 小于 105 MiB。
 
 ## Impact
 
@@ -90,3 +94,4 @@ OpsHalo 已有 Agent Harness、安全网关、审批、证据和验证骨架，�
 - 实施时需要评估 Chaterm 许可证边界并记录 clean-room 设计来源；不得复制 GPL 文件、提示词或协议实现。
 - Mini 产品面清理将删除不可达的会话 Renderer、Session Server、表单、构建 stub、专用依赖和仅验证已移除能力的测试，并增加旧数据加载与发行物依赖审计。
 - Codex Subscription 增加主进程运行时管理器、受限 IPC 和配置页下载状态；运行时缓存与账号目录分离，失败或取消不得清除账号、当前选择或 Agent 开关。
+- Strands 退出只改变已不可达的运行时实现和依赖；迁移不得改变 AI 账号、当前账号选择、Agent 启用状态、SSH/SFTP、MCP、OpenAI Compatible、Codex Subscription 或终端 WebGL 能力。

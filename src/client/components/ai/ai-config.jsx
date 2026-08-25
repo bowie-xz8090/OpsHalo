@@ -25,7 +25,6 @@ const STORAGE_KEY_CONFIG = 'ai_config_history'
 const EVENT_NAME_CONFIG = 'ai-config-history-update'
 
 const AGENT_DEFAULTS = {
-  agentHarnessAdapter: 'openai_compatible',
   agentGroundedSynthesisEnabled: true,
   agentFastModel: '',
   agentMaxContextTokens: 32000,
@@ -81,7 +80,6 @@ export default function AIConfigForm ({ initialValues, onSubmit, showAIConfig })
   const [providerPresetId, setProviderPresetId] = useState('custom')
   const baseURLAI = Form.useWatch('baseURLAI', form)
   const agentModeEnabled = Form.useWatch('agentModeEnabled', form)
-  const agentHarnessAdapter = Form.useWatch('agentHarnessAdapter', form)
   const agentSkillsEnabled = Form.useWatch('agentSkillsEnabled', form)
   const agentKnowledgeEnabled = Form.useWatch('agentKnowledgeEnabled', form)
   const aiBackendType = Form.useWatch('aiBackendType', form) || initialValues?.aiBackendType || 'openai_compatible'
@@ -94,19 +92,16 @@ export default function AIConfigForm ({ initialValues, onSubmit, showAIConfig })
     }
   }, [initialValues])
 
-  useEffect(() => {
-    if (agentHarnessAdapter === 'strands' && isDashScopeEndpoint(baseURLAI)) {
-      form.setFieldValue('agentHarnessAdapter', 'openai_compatible')
-    }
-  }, [agentHarnessAdapter, baseURLAI])
-
   function filter () {
     return true
   }
 
   const handleSubmit = async (values) => {
+    const safeInitialValues = { ...(initialValues || {}) }
+    delete safeInitialValues.agentHarnessAdapter
+    delete safeInitialValues.agentCompatibleFallbackEnabled
     const normalized = {
-      ...initialValues,
+      ...safeInitialValues,
       ...values,
       aiBackendType: values.aiBackendType === 'codex_subscription' ? 'codex_subscription' : 'openai_compatible',
       agentMutationEnabled: values.agentModeEnabled && values.agentMutationEnabled,
@@ -330,9 +325,9 @@ export default function AIConfigForm ({ initialValues, onSubmit, showAIConfig })
             <Form.Item
               label='高级：自定义 Codex App Server（可选）'
               name='codexAppServerExecutable'
-              tooltip='默认使用安装包内置的固定版本；仅在高级诊断时填写可信的本机绝对路径。'
+              tooltip='通常留空，优先使用兼容的本机 Codex；未检测到时按需下载固定版本。仅在高级诊断时填写可信的本机绝对路径。'
             >
-              <Input placeholder='通常留空，使用安装包内置版本' />
+              <Input placeholder='通常留空，自动检测或按需下载' />
             </Form.Item>
             <Form.Item name='codexProfileId' rules={[{ required: true, message: '请添加并选择一个 Codex 账号' }]}>
               <CodexAccountOverview />
@@ -377,7 +372,6 @@ export default function AIConfigForm ({ initialValues, onSubmit, showAIConfig })
             </Button>
           </Space>
         </Form.Item>
-        <Form.Item name='agentHarnessAdapter' hidden><Input /></Form.Item>
         <Collapse
           className='mg2b'
           items={[
@@ -505,14 +499,6 @@ export default function AIConfigForm ({ initialValues, onSubmit, showAIConfig })
       )}
     </>
   )
-}
-
-function isDashScopeEndpoint (value) {
-  try {
-    return /(?:^|\.)dashscope\.aliyuncs\.com$/i.test(new URL(String(value || '')).hostname)
-  } catch (_) {
-    return false
-  }
 }
 
 function detectProviderPreset (baseURL) {

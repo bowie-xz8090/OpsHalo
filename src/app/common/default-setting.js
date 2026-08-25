@@ -72,8 +72,6 @@ module.exports = exports.default = {
   agentModeEnabled: false,
   agentMutationEnabled: false,
   agentExternalMcpEnabled: false,
-  agentHarnessAdapter: 'openai_compatible',
-  agentCompatibleFallbackEnabled: false,
   agentRuntimeV2RolloutStage: 8,
   agentProviderStreamingV2: true,
   agentExecutionOutputProgressV2: true,
