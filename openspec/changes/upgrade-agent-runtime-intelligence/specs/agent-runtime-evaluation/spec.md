@@ -135,13 +135,14 @@
 
 ### Requirement: Electron 成品必须通过依赖与体积门禁
 
-v1.0.27 成品 SHALL 保留 Electron 的 GPU、SwiftShader、ffmpeg、语言运行支持和现有用户可见功能，同时从生产依赖和 `app.asar` 移除前端不可达的 Strands 运行时及其专用依赖。成品扫描 SHALL 拒绝 `@strands-agents/sdk`、`openai`、`@modelcontextprotocol/sdk`、`@opentelemetry/api`、`@aws-sdk`、`@smithy`、Codex 原生二进制和已删除的 Strands adapter；项目 SHALL 不直接声明未引用的 `jsonwebtoken`，但 MAY 保留同步组件实际使用的传递依赖；`app.asar` SHALL 不超过 18 MiB。
+v1.0.27 成品 SHALL 保留 Electron 的 GPU、SwiftShader、ffmpeg、语言运行支持和现有用户可见功能，同时从生产依赖和 `app.asar` 移除前端不可达的 Strands 运行时及其专用依赖。成品扫描 SHALL 拒绝 `@strands-agents/sdk`、`openai`、`@modelcontextprotocol/sdk`、`@opentelemetry/api`、`@aws-sdk`、`@smithy`、Codex 原生二进制和已删除的 Strands adapter；项目 SHALL 不直接声明未引用的 `jsonwebtoken`，但 MAY 保留同步组件实际使用的传递依赖；`app.asar` SHALL 不超过 18 MiB。打包 MAY 在最终应用签名前删除 Electron 上游二进制签名元数据，但 macOS 发布应用 MUST 在产物生成前完成有效的正式签名或 ad-hoc 签名并通过深度校验。
 
 #### Scenario: 依赖级瘦身通过
 
 - **GIVEN** v1.0.27 已在目标平台完成打包
 - **WHEN** CI 扫描 `app.asar`、unpacked 资源和发布资产
 - **THEN** 禁入包和二进制均不存在
+- **AND** macOS 应用签名可被系统深度校验且打包后可启动
 - **AND** Windows installer 不超过 90 MiB、Windows tar.gz 小于 120 MiB
 - **AND** macOS DMG 小于 95 MiB
 - **AND** Linux DEB/RPM/AppImage 小于 85 MiB、Linux tar.gz 小于 105 MiB

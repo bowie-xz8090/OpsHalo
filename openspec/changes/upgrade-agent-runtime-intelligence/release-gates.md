@@ -10,8 +10,8 @@
 - `npm run test-unit-ci`：15 个 suite、316 个测试全部通过；覆盖旧配置迁移、账号保持、OpenAI Compatible/Codex Subscription 规划、SSH/SFTP 安全边界、终端 WebGL 配置、依赖禁入、体积门禁和 Unix `node-pty` 完整运行时。
 - AI 配置、Shell/Agent 切换、嵌入式审批历史、动态高度、配置恢复和重启持久化 E2E 通过；全新隔离数据目录中的 Electron 本地终端成功执行 `ls`。
 - OpenAI Compatible 真实 loopback HTTP/SSE smoke、lint、严格 OpenSpec 校验和独立成品扫描通过。
-- macOS ARM64 `app.asar` 为 `14,215,365 bytes`（13.6 MiB）；DMG 为 `99,450,546 bytes`（94.8 MiB），满足 `< 95 MiB`。
-- 成品保留 GPU、SwiftShader、ffmpeg、语言资源以及 Unix `node-pty` 的 `pty.node`/`spawn-helper`；后两者在打包应用中实际返回 `PACKAGED_PTY_OK`，GUI 进程保持运行直至测试主动终止。
+- 依赖去重、未加载模块入口和原生编译头文件清理后，macOS ARM64 `app.asar` 为 `11,620,486 bytes`（11.1 MiB）；Electron 上游签名元数据在应用签名前移除，无证书构建使用独立 ad-hoc 权限重新签名，最终 DMG 为 `98,078,952 bytes`（93.5 MiB），满足 `< 95 MiB`。
+- macOS 应用通过 `codesign --verify --deep --strict` 并保持运行直至测试主动终止。成品保留 GPU、SwiftShader、ffmpeg、语言资源以及 Unix `node-pty` 的 `pty.node`/`spawn-helper`；打包应用中的 PTY 实际返回 `PACKAGED_PTY_OK`。
 - Windows、macOS x64 和 Linux 的最终体积及 `SHA256SUMS.txt` 等待 GitHub Actions 发布结果；`11.5` 和真实 OAuth 验收继续保持未勾选。
 
 以下内容保留为 v1.0.25 的历史发布基线；其中 Strands 与安装包内置 Codex 的描述不代表 v1.0.27 当前实现。

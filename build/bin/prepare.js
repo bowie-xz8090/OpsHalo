@@ -55,6 +55,8 @@ require('fs').writeFileSync(
 )
 
 exec(`cd work/app && npm i --omit=dev && cd ${cwd}`)
+// Hoist identical transitive packages before pruning alternate module formats.
+exec(`cd work/app && npm dedupe --omit=dev && cd ${cwd}`)
 rm('-rf', 'work/app/node_modules/.bin')
 // Remove axios browser/ESM builds and unnecessary files (keep only lib/ and node CJS)
 rm('-rf', 'work/app/node_modules/axios/dist/esm')

@@ -396,7 +396,8 @@ Preload 增加 `getRuntimeStatus()`、`cancelRuntimeDownload()` 和 `onRuntimeEv
 - AI 配置页只保留 OpenAI Compatible 与 ChatGPT/Codex 账号两种入口，不再携带隐藏的 `agentHarnessAdapter` 表单字段。
 - 主进程以归一化的有效配置创建 Harness；旧 `strands` 配置等价迁移为 `openai_compatible`，账号集合、当前账号、Agent 开关及其他 AI 字段原样保留。
 - 删除 Strands adapter 及 `@strands-agents/sdk`、`openai`、`@modelcontextprotocol/sdk`、`@opentelemetry/api`、AWS/Smithy 和项目未使用的顶层 `jsonwebtoken` 声明。历史 schema 可接受旧枚举，但生产代码不得导入已退出的 Agent 包；`electerm-sync` 实际使用的 JWT 传递依赖保留。
-- 生产依赖清理可删除 source map、类型声明、测试、示例和未加载入口，必须保留许可证与实际加载文件。
+- 生产依赖清理可删除 source map、类型声明、测试、示例、编译期原生头文件和未加载入口，并可合并满足同一版本约束的重复传递依赖；必须保留许可证与实际加载文件。
+- Windows NSIS 在没有差分更新消费者时使用固实最高压缩。`afterPack` 在应用签名前移除 Electron 上游二进制签名元数据；正式证书构建随后由 Electron Builder 重新签名，无证书 macOS CI 构建则使用独立的 ad-hoc 权限文件重新签名并完成深度校验。签名清理不得移除或修改 GPU、SwiftShader、ffmpeg、PTY 等运行组件。
 - `afterPack` 和独立成品扫描同时拒绝上述依赖、Codex 原生运行时和已删除 adapter；最终 `app.asar` 必须不超过 18 MiB。
 - v1.0.27 体积门禁为 Windows installer `<= 90 MiB`、Windows tar.gz `< 120 MiB`、macOS DMG `< 95 MiB`、Linux DEB/RPM/AppImage `< 85 MiB`、Linux tar.gz `< 105 MiB`。若超限，只继续依赖级清理，不以裁剪运行能力绕过门禁。
 

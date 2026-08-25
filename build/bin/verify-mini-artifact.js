@@ -41,7 +41,7 @@ const requiredRuntimePaths = [
   'agent/harness/openai-harness-adapter.js',
   'agent/harness/codex-app-server-adapter.js',
   'node_modules/node-pty/build/Release/pty.node',
-  ...(process.platform === 'win32' ? [] : ['node_modules/node-pty/build/Release/spawn-helper'])
+  ...(process.platform === 'darwin' ? ['node_modules/node-pty/build/Release/spawn-helper'] : [])
 ]
 
 function verifyMiniArtifact (artifactRoot = path.resolve(__dirname, '../../work/app')) {

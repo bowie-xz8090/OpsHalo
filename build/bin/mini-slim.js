@@ -70,9 +70,23 @@ function slimInstalledModules (nm = 'work/app/node_modules') {
 function removeCommonJsRuntimeAlternates (nm) {
   const paths = [
     'pako/dist',
+    '@electerm/electerm-locales/dist/esm',
     '@electerm/electerm-themes/dist/index.mjs',
+    '@electerm/electerm-themes/dist/themes',
+    '@noble/ciphers/esm',
+    '@noble/curves/esm',
+    '@noble/curves/node_modules/@noble/hashes/esm',
+    '@noble/hashes/esm',
+    '@noble/hashes/src',
     '@xterm/headless/lib-headless/xterm-headless.mjs',
     '@xterm/headless/lib-headless/xterm-headless.mjs.map',
+    'sm-crypto-v2/dist/index.mjs',
+    'sm-crypto-v2/dist/index.umd.js',
+    'sm-crypto-v2/miniprogram_dist',
+    'sm-crypto-v2/node_modules/@noble/hashes/esm',
+    'tar/dist/esm',
+    'trzsz2/dist/browser',
+    'trzsz2/dist/esm',
     'zod/index.js',
     'zod/locales',
     'zod/mini',
@@ -81,8 +95,19 @@ function removeCommonJsRuntimeAlternates (nm) {
     'zod/v4/mini'
   ]
   for (const relative of paths) fs.rmSync(resolve(nm, relative), { recursive: true, force: true })
+  removeUnusedFontListEntries(nm)
   removeMatchingFiles(resolve(nm, 'zod/v4'), name => name.endsWith('.js'))
   echo('[mini-slim] removed unused ESM/browser alternates from CommonJS main-process dependencies')
+}
+
+function removeUnusedFontListEntries (nm) {
+  const fontList = resolve(nm, 'font-list')
+  fs.rmSync(resolve(fontList, 'demo.js'), { force: true })
+  const currentPlatform = process.platform
+  for (const platform of ['darwin', 'linux', 'win32']) {
+    if (platform !== currentPlatform) fs.rmSync(resolve(fontList, 'libs', platform), { recursive: true, force: true })
+  }
+  fs.rmSync(resolve(fontList, 'libs', 'darwin', 'fontlist.m'), { force: true })
 }
 
 function removeMatchingFiles (root, predicate) {
@@ -134,6 +159,7 @@ module.exports = {
   slimInstalledModules,
   removeNonRuntimePackageFiles,
   removeCommonJsRuntimeAlternates,
+  removeUnusedFontListEntries,
   isNonRuntimePackageFile,
   NON_RUNTIME_DIRECTORIES
 }

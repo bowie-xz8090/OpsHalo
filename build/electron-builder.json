@@ -10,6 +10,10 @@
     "en-US"
   ],
   "asar": true,
+  "files": [
+    "**/*",
+    "!**/node-addon-api{,/**}"
+  ],
   "compression": "maximum",
   "afterPack": "./build/bin/after-pack.js",
   "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
@@ -44,6 +48,7 @@
   },
   "nsis": {
     "oneClick": false,
+    "differentialPackage": false,
     "artifactName": "${productName}-${version}-${os}-${arch}-installer.${ext}",
     "allowToChangeInstallationDirectory": true
   },
