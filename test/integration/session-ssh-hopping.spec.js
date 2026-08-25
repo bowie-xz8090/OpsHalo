@@ -18,6 +18,7 @@ process.env.NODE_ENV = 'development'
 const { describe, test, before, after } = require('node:test')
 const assert = require('node:assert/strict')
 const { execSync } = require('node:child_process')
+const fs = require('node:fs')
 const { setTimeout: delay } = require('node:timers/promises')
 const path = require('node:path')
 const net = require('node:net')
@@ -35,6 +36,7 @@ const TARGET_PASSWORD = 'target-password'
 const READY_TIMEOUT = 30000
 
 function isDockerAvailable () {
+  if (!fs.existsSync(COMPOSE_DIR)) return false
   try {
     execSync('docker info', { stdio: 'pipe' })
     return true
