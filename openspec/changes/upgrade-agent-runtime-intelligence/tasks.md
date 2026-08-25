@@ -141,8 +141,8 @@
 ## 13. Electron 稳妥瘦身与 1.0.27 发布
 
 - [x] 13.1 从 AI 配置页、默认配置和有效配置写入中移除隐藏 Strands 选择；旧 `agentHarnessAdapter=strands` 确定性迁移为 `openai_compatible`，并保持账号、当前选择与 Agent 开关。
-- [x] 13.2 删除 Strands Harness adapter 及其专用运行时路径，移除 `@strands-agents/sdk`、`openai`、`@modelcontextprotocol/sdk`、`@opentelemetry/api`、AWS/Smithy 和项目未使用的顶层 `jsonwebtoken` 声明；保留同步组件实际使用的 JWT 传递依赖。
-- [x] 13.3 扩展生产依赖清理、`afterPack` 与独立成品扫描，拒绝已移除依赖、Strands adapter 和 Codex 原生二进制，并强制 `app.asar <= 18 MiB`。
+- [x] 13.2 删除 Strands Harness adapter 及其专用运行时路径，移除 `@strands-agents/sdk`、`openai`、`@modelcontextprotocol/sdk`、`@opentelemetry/api`、AWS/Smithy；以 Node `crypto` 等价替换同步 JWT 后移除 `electerm-sync` 与 `jsonwebtoken`，保持 GitHub/Gitee/自建/Cloud 同步契约。
+- [x] 13.3 扩展生产依赖清理、`afterPack` 与独立成品扫描，裁剪经功能 smoke 验证的 Zod locale、SSH 国密和 TweetNaCl 未加载入口，拒绝已移除依赖、Strands adapter 和 Codex 原生二进制，并强制 `app.asar <= 18 MiB`。
 - [x] 13.4 增加旧 Strands 配置迁移、账号状态保持、OpenAI Compatible/Codex Subscription 规划、依赖禁入和平台体积门禁测试。
 - [x] 13.5 升级到 1.0.27，执行完整单元、Agent、AI 配置、SSH/SFTP、终端 WebGL、打包启动和 OpenSpec 验证；不得裁剪 GPU、SwiftShader、ffmpeg、语言运行支持或用户可见功能。
 - [ ] 13.6 通过 GitHub Actions 发布 v1.0.27 全平台安装包与 `SHA256SUMS.txt`，满足 Windows installer `<= 90 MiB`、Windows tar.gz `< 120 MiB`、macOS DMG `< 95 MiB`、Linux包 `< 85 MiB`、Linux tar.gz `< 105 MiB`；`11.5` 与真实 OAuth 验收继续保持未勾选。

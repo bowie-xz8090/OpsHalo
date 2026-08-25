@@ -37,9 +37,26 @@ exports.default = async function afterPack (context) {
 
 function stripUpstreamRuntimeSignatures (context) {
   if (context.electronPlatformName === 'darwin') {
-    stripMacSignatures(path.join(context.appOutDir, 'OpsHalo.app', 'Contents'))
+    const contents = path.join(context.appOutDir, 'OpsHalo.app', 'Contents')
+    stripMacSignatures(contents)
+    stripMacSymbols(contents)
   } else if (context.electronPlatformName === 'win32') {
     stripWindowsSignatures(context.appOutDir)
+  }
+}
+
+function stripMacSymbols (root) {
+  let removedBytes = 0
+  walkFiles(root, file => {
+    if (!isMachO(file)) return
+    const before = fs.statSync(file).size
+    try {
+      execFileSync('/usr/bin/strip', ['-u', '-r', file], { stdio: 'ignore' })
+      removedBytes += Math.max(0, before - fs.statSync(file).size)
+    } catch (_) {}
+  })
+  if (removedBytes) {
+    console.log(`[mini-slim] removed ${(removedBytes / 1024 / 1024).toFixed(1)} MiB of unused macOS link symbols`)
   }
 }
 
