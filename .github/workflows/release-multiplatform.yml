@@ -60,6 +60,9 @@ jobs:
       - name: Run unit and Agent tests
         run: npm run test-unit-ci
 
+      - name: Build application for integration tests
+        run: npm run b
+
       - name: Run integration tests
         run: npm run test-integration
 
