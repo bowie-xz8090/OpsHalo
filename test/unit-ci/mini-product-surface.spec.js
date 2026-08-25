@@ -122,16 +122,22 @@ test('node-pty cleanup preserves every Unix runtime binary', t => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'opshalo-node-pty-'))
   t.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }))
   const release = path.join(tempRoot, 'build', 'Release')
+  const buildDeps = path.join(tempRoot, 'build', 'deps')
   fs.mkdirSync(release, { recursive: true })
+  fs.mkdirSync(buildDeps, { recursive: true })
   for (const name of ['pty.node', 'spawn-helper', 'compile.log']) {
     fs.writeFileSync(path.join(release, name), name)
   }
+  fs.writeFileSync(path.join(buildDeps, 'winpty.vcxproj'), 'compile-only')
+  fs.writeFileSync(path.join(tempRoot, 'build', 'pty.vcxproj'), 'compile-only')
 
   slimNodePty(tempRoot)
 
   assert.equal(fs.existsSync(path.join(release, 'pty.node')), true)
   assert.equal(fs.existsSync(path.join(release, 'spawn-helper')), true)
   assert.equal(fs.existsSync(path.join(release, 'compile.log')), false)
+  assert.equal(fs.existsSync(buildDeps), false)
+  assert.equal(fs.existsSync(path.join(tempRoot, 'build', 'pty.vcxproj')), false)
 })
 
 test('package cleanup keeps CommonJS and current-platform runtime entries', t => {
