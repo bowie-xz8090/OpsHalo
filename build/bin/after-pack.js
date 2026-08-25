@@ -12,6 +12,7 @@ const {
   collectForbiddenRetiredAgentEntries,
   isForbiddenRetiredAgentPath
 } = require('./verify-mini-artifact')
+const { slimNodePty } = require('./mini-slim')
 
 const MAX_APP_ASAR_BYTES = 18 * 1024 * 1024
 
@@ -27,6 +28,7 @@ exports.default = async function afterPack (context) {
   const resourcesDir = process.platform === 'darwin'
     ? path.join(appOutDir, 'OpsHalo.app', 'Contents', 'Resources')
     : path.join(appOutDir, 'resources')
+  slimNodePty(path.join(resourcesDir, 'app.asar.unpacked', 'node_modules', 'node-pty'))
   const defaultApp = path.join(resourcesDir, 'default_app.asar')
   if (fs.existsSync(defaultApp)) {
     fs.unlinkSync(defaultApp)
